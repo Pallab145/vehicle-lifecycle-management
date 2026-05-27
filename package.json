@@ -1,0 +1,14 @@
+{
+  "name": "vehicle-lifecycle-monorepo",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "contracts",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces",
+    "build": "npm run build --workspaces",
+    "install:all": "npm install"
+  }
+}

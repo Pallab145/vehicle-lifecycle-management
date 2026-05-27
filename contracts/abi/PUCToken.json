@@ -1,0 +1,879 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PUC_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addrToCenter",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "centerCode",
+    "inputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "centers",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "auth",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCenter",
+    "inputs": [
+      {
+        "name": "centerId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PUCToken.Center",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "auth",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "active",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getEmissions",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "co",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "hc",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "smoke",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "passed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPUC",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PUCToken.PUC",
+        "components": [
+          {
+            "name": "certId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "ownTid",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "centerId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "issueDate",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "expiryDate",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "co",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "hc",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "smoke",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "passed",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getRoleAdmin",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getVehiclePUC",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PUCToken.PUC",
+        "components": [
+          {
+            "name": "certId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "ownTid",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "centerId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "issueDate",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "expiryDate",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "co",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "hc",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "smoke",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "passed",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "grantRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "hasRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isCenterActive",
+    "inputs": [
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isPUCValid",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "issuePUC",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiryDate",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "co",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "hc",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "smoke",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "passed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "markExpired",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "ownToPUC",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pucs",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "ownTid",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "centerId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "issueDate",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "expiryDate",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "co",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "hc",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "smoke",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "passed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "valid",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "regCenter",
+    "inputs": [
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "auth",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "renounceRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "callerConfirmation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "revokeRole",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "supportsInterface",
+    "inputs": [
+      {
+        "name": "interfaceId",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "toggleCenterStatus",
+    "inputs": [
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "CenterReg",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "auth",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CenterStatusToggled",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PUCExpired",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PUCIssued",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "passed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "expiry",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleAdminChanged",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "previousAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "newAdminRole",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleGranted",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoleRevoked",
+    "inputs": [
+      {
+        "name": "role",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AccessControlBadConfirmation",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AccessControlUnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "neededRole",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CenterExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CenterNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CenterNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CertExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CertNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Overflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TestFailed",
+    "inputs": []
+  }
+]
