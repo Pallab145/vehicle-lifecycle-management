@@ -4,7 +4,6 @@ import { getRedisClient } from '@/lib/redis';
 import prisma from '@/lib/prisma';
 import { env } from '@/config/env';
 import { logger } from '@/lib/logger';
-import crypto from 'crypto';
 import { 
     SyncStatus, 
     TxActionType, 
@@ -19,8 +18,6 @@ import {
     type B2BEntity 
 } from '@/generated/prisma/client';
 import { RECONCILIATION_QUEUE_NAME } from './reconciliation.queue';
-import { RedisKeys } from '@/config/redis.keys';
-import type { NotificationEvent } from '@/modules/notification/notification.types';
 import { workerManager } from '@/lib/worker-manager';
 
 // Import ABIs for event parsing
@@ -109,7 +106,6 @@ async function reconcileTransactions() {
                 if (receipt.status === 1) {
                     // Transaction Succeeded! The Indexer missed the event.
                     logger.info({ id: tx.id, txHash: tx.txHash, action: tx.actionType }, 'Transaction succeeded but was missed by Indexer. Reconciling manually.');
-                    
                     await handleSuccessfulReconciliation(tx, receipt);
                 }
 
@@ -147,7 +143,6 @@ async function getBlockTimestamp(blockNumber: number): Promise<Date> {
 }
 
 async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt: TransactionReceipt) {
-    let postCommitFn: (() => void) | null = null;
     // Pre-parse all events from the receipt once — avoids redundant log iteration per handler.
     const events = parseReceiptEvents(receipt);
 
@@ -171,8 +166,6 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
                 where: { id: entity.id },
                 data: { onChainId: Number(onChainId) }
             });
-
-            postCommitFn = () => broadcastEntityMined(entity, onChainId, tx.txHash);
         } 
         else if (tx.actionType === TxActionType.B2B_ENTITY_TOGGLE && tx.b2bEntityId) {
             const entity = await db.b2BEntity.findUnique({ where: { id: tx.b2bEntityId } });
@@ -512,11 +505,6 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
             }
         }
     });
-
-    if (postCommitFn) {
-        try { (postCommitFn as () => void)(); }
-        catch (err) { logger.error({ err }, 'Error broadcasting notification after transaction commit'); }
-    }
 }
 
 // FIX: Rollback operations are independent compensating actions.
@@ -685,36 +673,4 @@ function extractEntityIdFromReceipt(entity: B2BEntity, receipt: TransactionRecei
         } catch { continue; }
     }
     return null;
-}
-
-function broadcastEntityMined(entity: B2BEntity, onChainId: bigint, txHash: string) {
-    const redisPublisher = getRedisClient();
-    
-    // Determine the event type based on entity type to match Indexer
-    let typeStr = '';
-    switch (entity.type) {
-        case EntityType.MANUFACTURER: typeStr = 'MFG_REG'; break;
-        case EntityType.SCRAP_CENTER: typeStr = 'SCRAP_REG'; break;
-        case EntityType.RTO: typeStr = 'RTO_REG'; break;
-        case EntityType.POLICE: typeStr = 'POLICE_REG'; break;
-        case EntityType.INSURANCE: typeStr = 'INS_REG'; break;
-        case EntityType.PUC_CENTER: typeStr = 'PUC_CENTER_REG'; break;
-        case EntityType.BANK: typeStr = 'BANK_REG'; break;
-        default: return;
-    }
-
-    const dynamicKey = `${typeStr.split('_')[0].toLowerCase()}Id`;
-    const notification = {
-        type: typeStr as NotificationEvent['type'],
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        data: {
-            [dynamicKey]: String(onChainId),
-            code: entity.code,
-            authWallet: entity.walletAddress,
-            txHash
-        }
-    } as unknown as NotificationEvent;
-
-    redisPublisher.publish(RedisKeys.NOTIFICATION_CHANNEL('entity', entity.id), JSON.stringify(notification));
 }

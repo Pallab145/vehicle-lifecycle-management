@@ -8,6 +8,16 @@ export const COOKIE = {
     SIWE_NONCE: 'vl_siwe_nonce',
 };
 
+export const CSRF_TOKEN_LENGTH = 32;
+
+export const CSRF_EXEMPT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export const CSRF_EXEMPT_PATHS = new Set([
+    '/api/auth/login',
+    '/api/auth/citizen/login',
+    '/api/auth/refresh',
+]);
+
 export const AUTH = {
     PASSWORD_MIN_LENGTH: 8,
     OTP_LENGTH: 6,

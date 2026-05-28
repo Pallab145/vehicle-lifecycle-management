@@ -8,6 +8,7 @@ import { requestContext } from '@/middlewares/requestContext';
 import { errorHandler } from '@/middlewares/errorHandler';
 import apiRoutes from '@/routes';
 import { globalRateLimit } from '@/middlewares/rate-limit';
+import { csrfProtection } from '@/middlewares/csrf.middleware';
 
 export function createApp(): express.Application {
     const app = express();
@@ -27,6 +28,9 @@ export function createApp(): express.Application {
     // ── 2. Cookie Parser & Body Parser ────────────────────────────────
     app.use(cookieParser());
     app.use(express.json({ limit: '1mb' }));
+
+    // ── 2.5 CSRF Protection ───────────────────────────────────────────
+    app.use(csrfProtection);
 
     // ── 3. Application CORS ───────────────────────────────────────────
     app.use(cors({

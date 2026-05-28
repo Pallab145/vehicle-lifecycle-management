@@ -30,7 +30,7 @@ export const tokenService = {
     /**
      * Set cookies on the response object securely.
      */
-    setCookies(res: Response, accessToken: string, refreshToken: string) {
+    setCookies(res: Response, accessToken: string, refreshToken: string, csrfToken?: string) {
         const domain = env.NODE_ENV === 'production' && env.APP_DOMAIN !== 'localhost' 
             ? `.${env.APP_DOMAIN}` 
             : undefined;
@@ -50,6 +50,16 @@ export const tokenService = {
             maxAge: env.JWT_REFRESH_TTL * 1000,
             domain
         });
+
+        if (csrfToken) {
+            res.cookie(COOKIE.CSRF_TOKEN, csrfToken, {
+                httpOnly: false, // Must be readable by client JS to send in headers
+                secure: env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: env.JWT_REFRESH_TTL * 1000,
+                domain
+            });
+        }
     },
 
     /**
@@ -62,6 +72,7 @@ export const tokenService = {
 
         res.clearCookie(COOKIE.ACCESS_TOKEN, { domain });
         res.clearCookie(COOKIE.REFRESH_TOKEN, { domain });
+        res.clearCookie(COOKIE.CSRF_TOKEN, { domain });
     },
 
     /**
@@ -103,8 +114,11 @@ export const tokenService = {
         payload.jti = hashedJti; 
         const linkedAccessToken = jwt.sign(payload, env.JWT_SECRET, { algorithm: 'HS256' });
 
-        // 5. Set Cookie with the RAW token (the client needs the unhashed version)
-        this.setCookies(res, linkedAccessToken, rawRefreshToken);
+        // 5. Generate CSRF Token
+        const csrfToken = crypto.randomBytes(16).toString('hex'); // 32 characters
+
+        // 6. Set Cookie with the RAW token (the client needs the unhashed version)
+        this.setCookies(res, linkedAccessToken, rawRefreshToken, csrfToken);
 
         return { accessToken: linkedAccessToken, refreshToken: rawRefreshToken };
     },
@@ -143,8 +157,11 @@ export const tokenService = {
 
         const accessToken = jwt.sign(payload, env.JWT_SECRET, { algorithm: 'HS256' });
 
-        // 2. Set Cookie with the RAW token
-        this.setCookies(res, accessToken, rawRefreshToken); 
+        // 2. Generate CSRF Token
+        const csrfToken = crypto.randomBytes(16).toString('hex'); // 32 characters
+
+        // 3. Set Cookie with the RAW token
+        this.setCookies(res, accessToken, rawRefreshToken, csrfToken); 
 
         return { accessToken, refreshToken: rawRefreshToken };
     },
