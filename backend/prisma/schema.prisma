@@ -1,3 +1,6 @@
+// ============================================================
+// Prisma Schema — Vehicle Lifecycle Management System
+// ============================================================
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -10,4 +13,746 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+/// The type of B2B institutional entity in the system.
+/// Note: DEALER is intentionally excluded — dealers are B2C citizens (Users) who hold TradeCerts,
+/// not institutional B2B entities. They have no on-chain role granted by the contracts.
+enum EntityType {
+  GOVERNMENT // Central Authority / Ministry (MoRTH) - The Super Admin
+  RTO // Regional Transport Office
+  MANUFACTURER // Vehicle Manufacturer
+  POLICE // Police Station
+  INSURANCE // Insurance Company
+  PUC_CENTER // Pollution Under Control Testing Center
+  SCRAP_CENTER // Authorized Scrap / Dismantling Center
+  BANK // Financial Institution / Lender (LoanContract: BankReg)
+}
+
+/// Role of a human member WITHIN a B2B entity.
+enum MemberRole {
+  OWNER // Full control of the entity account
+  ADMIN // Can manage members and operations
+  OPERATOR // Can perform day-to-day operations (issue challans, policies, etc.)
+  VIEWER // Read-only access
+}
+
+/// On-chain vehicle lifecycle status (mirrors DVP contract Status enum).
+enum VehicleStatus {
+  NOT_REG // Manufactured but not yet registered with RTO
+  ACTIVE // Registered and on the road
+  SCRAPPED // Vehicle permanently decommissioned
+}
+
+/// Lifecycle state of an ownership transfer request.
+enum TransferStatus {
+  PENDING // Initiated by seller
+  BUYER_ACCEPTED // Buyer confirmed
+  RTO_APPROVED // RTO completed, transfer done
+  CANCELLED // Cancelled by any party or admin
+}
+
+/// State of a traffic violation challan.
+enum ChallanStatus {
+  PENDING // Unpaid
+  PAID // Challan cleared
+  CANCELLED // Cancelled (by police or admin)
+}
+
+/// State of a vehicle insurance policy.
+enum InsuranceStatus {
+  ACTIVE // Coverage is live
+  EXPIRED // Policy period ended
+  CANCELLED
+}
+
+/// State of a PUC (Pollution Under Control) certificate.
+enum PucStatus {
+  VALID
+  EXPIRED
+  REVOKED
+}
+
+/// State of a vehicle loan.
+enum LoanStatus {
+  ACTIVE // Loan is outstanding
+  CLEARED // Fully repaid
+  DEFAULTED // Defaulted
+}
+
+/// OTP purpose for B2B members.
+enum OtpPurpose {
+  PASSWORD_RESET
+  EMAIL_VERIFY
+  TWO_FACTOR
+}
+
+enum SyncStatus {
+  PENDING // Transaction submitted to mempool, awaiting indexer confirmation
+  MINED // Confirmed on-chain by the indexer
+  FAILED // Transaction reverted or failed
+}
+
+/// Identifies the specific on-chain action that triggered the transaction.
+enum TxActionType {
+  B2B_ENTITY_REGISTER
+  B2B_ENTITY_TOGGLE
+  VEHICLE_MINT
+  VEHICLE_SCRAP
+  VEHICLE_ASSIGN_DEALER
+  VEHICLE_REGISTER_RTO
+  TRANSFER_INIT
+  TRANSFER_APPROVE_BUYER
+  TRANSFER_APPROVE_RTO
+  TRANSFER_CANCEL
+  TRADE_CERT_ISSUE
+  TRADE_CERT_REVOKE
+  CHALLAN_ISSUE
+  CHALLAN_PAY
+  CHALLAN_CANCEL
+  INSURANCE_ISSUE
+  /// Maps to ClaimFiled(polId, claimNum) event — increments claimCount on an active policy.
+  INSURANCE_CLAIM
+  /// Maps to PolicyExpired(polId) event — transitions policy status to EXPIRED.
+  INSURANCE_EXPIRE
+  PUC_ISSUE
+  /// Maps to PUCExpired(certId) event — transitions certificate status to EXPIRED.
+  PUC_EXPIRE
+  LOAN_DISBURSE
+  LOAN_CLEAR
+}
+
+// ============================================================
+// AUTH — B2C (Citizens)
+// ============================================================
+
+/// A citizen vehicle owner. Authenticated via wallet signature (SIWE).
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  name          String?
+  email         String?  @unique
+  phone         String?  @unique
+  /// KYC status (Aadhaar/DL verification)
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Auth
+  refreshTokens RefreshToken[]
+
+  // B2C Blockchain Cross-Relations (Citizen Dashboard)
+  /// Vehicles this citizen currently owns (from VehicleReg / XferDone events)
+  ownedVehicles      VehicleOwnership[] @relation("CurrentOwner")
+  /// Transfers initiated as seller (XferInit: msg.sender)
+  soldTransfers      TransferRequest[]  @relation("TransferSeller")
+  /// Transfers accepted as buyer (XferInit: buyer param)
+  boughtTransfers    TransferRequest[]  @relation("TransferBuyer")
+  /// Challans issued against vehicles this citizen owned at the time
+  challansReceived   Challan[]          @relation("ViolatorUser")
+  /// Insurance policies this citizen holds (PolicyIssued: owner param)
+  heldPolicies       InsurancePolicy[]  @relation("PolicyHolder")
+  /// Loans this citizen borrowed (LoanReg: borrower = current ownTid owner)
+  borrowedLoans      LoanRecord[]       @relation("LoanBorrower")
+  /// NOC certificates minted to this citizen (NOCIssued: owner param)
+  nocReceived        LoanRecord[]       @relation("NocRecipient")
+  /// Vehicles assigned to this citizen-dealer before first RTO registration (VehicleAssignedToDealer)
+  heldVehicles       VehiclePassport[]  @relation("DealerUser")
+  /// TradeCerts issued by RTO to this citizen-dealer (TradeCertIssued: dealer param)
+  receivedTradeCerts TradeCert[]        @relation("DealerUser")
+  /// PUC certificates issued to vehicles owned by this citizen
+  pucCertificates    PucCertificate[]   @relation("PucOwner")
+  /// Blockchain transactions initiated directly by this citizen via MetaMask.
+  initiatedTransactions BlockchainTransaction[] @relation("InitiatedTransactions")
+
+  @@index([walletAddress])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================================
+// AUTH — B2B (Institutions)
+// ============================================================
+
+/// An institutional entity (RTO, Manufacturer, Police Station, etc.)
+/// registered on-chain and managed off-chain by the backend.
+model B2BEntity {
+  id            String     @id @default(cuid())
+  type          EntityType
+  /// Short unique code used in contracts (e.g., "MH12-RTO", "DL-POLICE-01")
+  code          String     @unique
+  name          String
+  /// The Ethereum wallet address this entity uses to interact with smart contracts.
+  walletAddress String     @unique
+  /// The numeric ID assigned by the smart contract (e.g., rtoId, policeId, mfgId).
+  onChainId     BigInt?
+
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  /// The Government Admin B2B member who registered this entity on-chain.
+  /// Populated by Indexer from MfgReg, RTOReg, PoliceReg, InsReg, CenterReg, BankReg events.
+  registeredByMemberId String?
+
+  // Relations
+  members            B2BMember[]
+  signingKey         EntitySigningKey?
+  registeredByMember B2BMember?        @relation("RegisteredEntities", fields: [registeredByMemberId], references: [id])
+
+  // Blockchain-indexed data linked to this entity
+  manufacturedVehicles VehiclePassport[]  @relation("ManufacturerEntity")
+  scrappedVehicles     VehiclePassport[]  @relation("ScrapEntity")
+  registeredVehicles   VehicleOwnership[] @relation("RtoEntity")
+  approvedTransfers    TransferRequest[]  @relation("RtoApproverEntity")
+  issuedTradeCerts     TradeCert[]        @relation("RtoIssuedTradeCert")
+  issuedChallans       Challan[]          @relation("PoliceEntity")
+  issuedPolicies       InsurancePolicy[]  @relation("InsuranceEntity")
+  issuedPucCerts       PucCertificate[]   @relation("PucEntity")
+  grantedLoans         LoanRecord[]       @relation("LenderEntity")
+  transactions         BlockchainTransaction[]
+
+  @@index([type])
+  @@index([walletAddress])
+  @@index([onChainId])
+  @@map("b2b_entities")
+}
+
+/// A human staff member who belongs to a B2B entity.
+/// Authenticates via email + password. Can request password reset via OTP.
+model B2BMember {
+  id           String     @id @default(cuid())
+  entityId     String
+  email        String     @unique
+  name         String
+  /// Argon2/bcrypt hashed password. Never stored in plaintext.
+  passwordHash String
+  role         MemberRole @default(OPERATOR)
+  isActive     Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Relations
+  entity        B2BEntity          @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+  otpCodes      OtpCode[]
+  createdKeys   EntitySigningKey[] @relation("KeyCreatedBy")
+
+  // Blockchain Audit Relations (actions performed by this B2B staff member)
+  createdPassports   VehiclePassport[]
+  rtoRegistrations   VehicleOwnership[]
+  /// RTO clerk who gave final approveTransfer() approval (not the seller/buyer, who are Citizens)
+  approvedTransfers  TransferRequest[]  @relation("RtoApprovedMember")
+  issuedTradeCerts   TradeCert[]
+  issuedChallans     Challan[]          @relation("IssuedChallans")
+  cancelledChallans  Challan[]          @relation("CancelledChallans")
+  issuedPolicies     InsurancePolicy[]
+  issuedPucCerts     PucCertificate[]
+  grantedLoans       LoanRecord[]
+  /// Entities this member registered on-chain (Gov admin audit: MfgReg, RTOReg, etc.)
+  registeredEntities B2BEntity[]        @relation("RegisteredEntities")
+  /// Blockchain transactions submitted via the backend API by this staff member.
+  initiatedTransactions BlockchainTransaction[] @relation("InitiatedTransactions")
+
+  @@index([entityId])
+  @@index([email])
+  @@index([entityId, role])
+  @@map("b2b_members")
+}
+
+/// Encrypted Ethereum signing key for a B2B entity's relayer wallet.
+/// Used by the backend to sign on-chain transactions on behalf of the entity.
+///
+/// Security: encryptedPrivateKey is AES-256-GCM encrypted using the
+/// MASTER_ADMIN_KEY / RTO_MASTER_KEY / POLICE_MASTER_KEY env variables.
+/// It is NEVER stored in plaintext.
+model EntitySigningKey {
+  id                  String   @id @default(cuid())
+  entityId            String   @unique
+  /// AES-256-GCM ciphertext (base64). Decrypt with the appropriate MASTER_KEY env var.
+  encryptedPrivateKey String
+  /// The corresponding unencrypted public key / Ethereum address.
+  publicKey           String
+  /// Increment this on key rotation to track versions.
+  keyVersion          Int      @default(1)
+  algorithm           String   @default("AES-256-GCM")
+  createdAt           DateTime @default(now())
+  rotatedAt           DateTime @default(now())
+  /// The staff member who last set or rotated this key.
+  createdById         String?
+
+  // Relations
+  entity    B2BEntity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  createdBy B2BMember? @relation("KeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([entityId])
+  @@map("entity_signing_keys")
+}
+
+/// OTP codes for B2B member flows: password reset, email verification, 2FA.
+model OtpCode {
+  id        String     @id @default(cuid())
+  memberId  String
+  /// 6-digit OTP code hash (bcrypt or SHA-256).
+  codeHash  String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  // Relations
+  member B2BMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, purpose])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+/// JWT refresh tokens for both B2C (userId) and B2B (memberId) users.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  /// JWT ID claim — unique identifier for this token pair.
+  jti       String    @unique
+  /// Set for B2C citizen sessions.
+  userId    String?
+  /// Set for B2B member sessions.
+  memberId  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  /// IP address that issued this token, for anomaly detection.
+  issuedIp  String?
+  /// Device fingerprint from cookie.
+  deviceId  String?
+
+  // Relations
+  user   User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  member B2BMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([jti])
+  @@index([userId])
+  @@index([memberId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// BLOCKCHAIN-INDEXED DATA
+// ============================================================
+
+/// Soulbound permanent vehicle identity from the DigitalVehiclePassport (DVP) contract.
+/// Indexed from: VehicleMfg, StatusChange, VehicleScrapped, VehicleAssignedToDealer events.
+model VehiclePassport {
+  id            String        @id @default(cuid())
+  /// On-chain ERC721 token ID from DVP contract. Populated by Indexer.
+  dvpId         BigInt?       @unique
+  /// keccak256(VIN) — stored as hex string.
+  vinHash       String        @unique
+  engineHash    String
+  chassisHash   String
+  specsHash     String
+  status        VehicleStatus @default(NOT_REG)
+  /// B2B entity of type MANUFACTURER.
+  mfgEntityId   String
+  mfgDate       DateTime
+  /// Dealer wallet assigned by manufacturer for first sale (VehicleAssignedToDealer event).
+  dealerWallet  String?
+  /// Resolved B2C citizen-dealer User holding this vehicle before first RTO registration.
+  dealerUserId  String?
+  /// B2B entity of type SCRAP_CENTER.
+  scrapEntityId String?
+  scrapDate     DateTime?
+
+  /// The specific B2B Manufacturer member who called manufacture()
+  createdByMemberId String?
+
+  // Relations
+  manufacturer    B2BEntity         @relation("ManufacturerEntity", fields: [mfgEntityId], references: [id])
+  scrapCenter     B2BEntity?        @relation("ScrapEntity", fields: [scrapEntityId], references: [id])
+  dealerUser      User?             @relation("DealerUser", fields: [dealerUserId], references: [id])
+  createdByMember B2BMember?        @relation(fields: [createdByMemberId], references: [id])
+  ownership       VehicleOwnership?
+  transactions    BlockchainTransaction[]
+
+  @@index([dvpId])
+  @@index([vinHash])
+  @@index([mfgEntityId])
+  @@index([dealerUserId])
+  @@index([status])
+  @@map("vehicle_passports")
+}
+
+/// Current and historical legal ownership record from OwnershipToken contract.
+/// Indexed from: VehicleReg, XferDone events.
+model VehicleOwnership {
+  id            String   @id @default(cuid())
+  /// On-chain ERC721 token ID from OwnershipToken contract. Populated by Indexer.
+  ownTid        BigInt?  @unique
+  /// Web2 Foreign Key to VehiclePassport
+  passportId    String   @unique
+  /// DVP token ID for quick on-chain reference
+  dvpId         BigInt?
+  /// The B2B entity of type RTO that registered/last approved this vehicle.
+  rtoEntityId   String
+  /// Current owner's Ethereum wallet address.
+  ownerWallet   String
+  regDate       DateTime
+  transferCount Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  /// Resolved B2C Citizen who owns this vehicle (from VehicleReg event: owner param)
+  ownerUserId String?
+  /// The specific RTO B2B member who submitted the registration transaction
+  rtoMemberId String?
+
+  // Relations
+  passport          VehiclePassport   @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  rtoEntity         B2BEntity         @relation("RtoEntity", fields: [rtoEntityId], references: [id])
+  ownerUser         User?             @relation("CurrentOwner", fields: [ownerUserId], references: [id])
+  rtoMember         B2BMember?        @relation(fields: [rtoMemberId], references: [id])
+  transferRequests  TransferRequest[]
+  challans          Challan[]
+  insurancePolicies InsurancePolicy[]
+  pucCertificates   PucCertificate[]
+  loanRecords       LoanRecord[]
+  transactions      BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([ownerWallet])
+  @@index([ownerUserId])
+  @@index([rtoEntityId])
+  @@index([isActive])
+  @@map("vehicle_ownerships")
+}
+
+/// Ownership transfer requests from OwnershipToken contract.
+/// Indexed from: XferInit, XferApproved, XferDone, XferCancelled events.
+model TransferRequest {
+  id            String         @id @default(cuid())
+  /// On-chain reqId counter from OwnershipToken.
+  reqId         BigInt?        @unique
+  /// Web2 Foreign Key
+  ownershipId   String
+  ownTid        BigInt?
+  sellerWallet  String
+  buyerWallet   String
+  /// Set when RTO approves (from XferApproved/XferDone event).
+  rtoEntityId   String?
+  status        TransferStatus @default(PENDING)
+  reqDate       DateTime
+  completedDate DateTime?
+
+  // Mirrors Solidity Xfer struct EXACTLY for accurate state recovery on page refresh
+  /// Seller approved — set on XferInit (approver=0)
+  sellerOK Boolean @default(false)
+  /// Buyer accepted — set on XferApproved (approver=1)
+  buyerOK  Boolean @default(false)
+  /// RTO approved — set on XferApproved (approver=2) + XferDone
+  rtoOK    Boolean @default(false)
+
+  /// Resolved B2C Citizen who is the seller (XferInit: msg.sender)
+  sellerUserId        String?
+  /// Resolved B2C Citizen who is the buyer (XferInit: buyer param)
+  buyerUserId         String?
+  /// The specific RTO B2B member who called approveTransfer()
+  rtoApproverMemberId String?
+
+  // Relations
+  ownership         VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  rtoApprover       B2BEntity?       @relation("RtoApproverEntity", fields: [rtoEntityId], references: [id])
+  sellerUser        User?            @relation("TransferSeller", fields: [sellerUserId], references: [id])
+  buyerUser         User?            @relation("TransferBuyer", fields: [buyerUserId], references: [id])
+  rtoApproverMember B2BMember?       @relation("RtoApprovedMember", fields: [rtoApproverMemberId], references: [id])
+  transactions      BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([sellerWallet])
+  @@index([buyerWallet])
+  @@index([sellerUserId])
+  @@index([buyerUserId])
+  @@index([status])
+  @@map("transfer_requests")
+}
+
+/// Dealer trade certificates issued by RTO from OwnershipToken contract.
+/// Indexed from: TradeCertIssued, TradeCertRevoked events.
+/// A DEALER must hold a valid TradeCert before RTO can register a vehicle for first sale.
+model TradeCert {
+  id           String   @id @default(cuid())
+  /// Raw dealer wallet address (key in on-chain tradeCerts[dealer] mapping)
+  dealerWallet String
+  /// Resolved B2C citizen-dealer User (TradeCertIssued: dealer param)
+  dealerUserId String?
+  rtoEntityId  String
+  issuedAt     DateTime
+  validTill    DateTime
+  isActive     Boolean  @default(true)
+
+  /// The specific B2B RTO member who called issueTradeCert()
+  createdByMemberId String?
+
+  // Relations
+  rtoEntity       B2BEntity  @relation("RtoIssuedTradeCert", fields: [rtoEntityId], references: [id])
+  dealerUser      User?      @relation("DealerUser", fields: [dealerUserId], references: [id])
+  createdByMember B2BMember? @relation(fields: [createdByMemberId], references: [id])
+  transactions    BlockchainTransaction[]
+
+  @@index([dealerWallet])
+  @@index([dealerUserId])
+  @@index([rtoEntityId])
+  @@index([validTill])
+  @@map("trade_certs")
+}
+
+/// Traffic violation challans from ChallanContract.
+/// Indexed from: ChallanIssued, ChallanPaid, ChallanCancelled events.
+model Challan {
+  id             String        @id @default(cuid())
+  /// On-chain challanId counter from ChallanContract.
+  challanId      BigInt?       @unique
+  /// Web2 Foreign Key
+  ownershipId    String
+  ownTid         BigInt?
+  /// The B2B entity of type POLICE that issued the challan.
+  policeEntityId String
+  /// Amount in Wei (smallest unit), stored as Decimal for DB precision.
+  amount         Decimal       @db.Decimal(36, 0)
+  status         ChallanStatus @default(PENDING)
+  isAdminCancel  Boolean       @default(false)
+  issuedAt       DateTime
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+  /// Raw wallet of who confirmed the payment (police station wallet, on behalf of citizen)
+  paidByWallet   String?
+
+  /// The specific B2B police member who issued this challan
+  createdByMemberId   String?
+  /// The specific B2B member who cancelled this challan
+  cancelledByMemberId String?
+  /// Resolved Citizen who owned the vehicle AT THE TIME the challan was issued (historical audit)
+  violatorUserId      String?
+
+  // Relations
+  ownership         VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  policeEntity      B2BEntity        @relation("PoliceEntity", fields: [policeEntityId], references: [id])
+  createdByMember   B2BMember?       @relation("IssuedChallans", fields: [createdByMemberId], references: [id])
+  cancelledByMember B2BMember?       @relation("CancelledChallans", fields: [cancelledByMemberId], references: [id])
+  violatorUser      User?            @relation("ViolatorUser", fields: [violatorUserId], references: [id])
+  transactions      BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([policeEntityId])
+  @@index([violatorUserId])
+  @@index([status])
+  @@index([challanId])
+  @@map("challans")
+}
+
+/// Insurance policies from InsuranceToken contract.
+/// Indexed from: PolicyIssued, ClaimFiled, PolicyExpired events.
+model InsurancePolicy {
+  id          String          @id @default(cuid())
+  /// On-chain polId counter from InsuranceToken.
+  polId       BigInt?         @unique
+  /// Web2 Foreign Key
+  ownershipId String
+  ownTid      BigInt?
+  /// The B2B entity of type INSURANCE that issued this policy.
+  insEntityId String
+  coverage    Decimal         @db.Decimal(36, 0)
+  premium     Decimal         @db.Decimal(36, 0)
+  claimCount  Int             @default(0)
+  status      InsuranceStatus @default(ACTIVE)
+  issueDate   DateTime
+  expiryDate  DateTime
+  /// Raw citizen wallet that received the policy NFT (from PolicyIssued: owner param)
+  ownerWallet String
+
+  /// The specific B2B insurance member who issued this policy
+  createdByMemberId String?
+  /// Resolved Citizen who holds this policy (PolicyIssued: owner param)
+  ownerUserId       String?
+
+  // Relations
+  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  insEntity       B2BEntity        @relation("InsuranceEntity", fields: [insEntityId], references: [id])
+  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
+  policyHolder    User?            @relation("PolicyHolder", fields: [ownerUserId], references: [id])
+  transactions    BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([insEntityId])
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("insurance_policies")
+}
+
+/// PUC (Pollution Under Control) certificates from PUCToken contract.
+/// Indexed from: PUCIssued, PUCExpired events.
+model PucCertificate {
+  id          String    @id @default(cuid())
+  /// On-chain certId counter from PUCToken.
+  certId      BigInt?   @unique
+  /// Web2 Foreign Key
+  ownershipId String
+  ownTid      BigInt?
+  /// The B2B entity of type PUC_CENTER.
+  pucEntityId String
+  co          Int // CO emission level (uint16 from contract)
+  hc          Int // HC emission level
+  smoke       Int // Smoke level
+  passed      Boolean
+  status      PucStatus @default(VALID)
+  issueDate   DateTime
+  expiryDate  DateTime
+  /// Raw wallet of vehicle owner AT TIME of PUC issuance (PUC stays with vehicle, not owner — historical audit)
+  ownerWallet String?
+
+  /// The specific B2B PUC center member who issued this certificate
+  createdByMemberId String?
+  /// Resolved Citizen who owned the vehicle when PUC was issued (historical audit only)
+  ownerUserId       String?
+
+  // Relations
+  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  pucEntity       B2BEntity        @relation("PucEntity", fields: [pucEntityId], references: [id])
+  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
+  ownerUser       User?            @relation("PucOwner", fields: [ownerUserId], references: [id])
+  transactions    BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([pucEntityId])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("puc_certificates")
+}
+
+/// Vehicle loan records from LoanContract.
+/// Indexed from: LoanDisbursed, LoanCleared events.
+model LoanRecord {
+  id                 String     @id @default(cuid())
+  /// On-chain loanId counter from LoanContract.
+  loanId             BigInt?    @unique
+  /// Web2 Foreign Key
+  ownershipId        String
+  ownTid             BigInt?
+  /// Lender entity (financial institution) — B2B entity.
+  lenderEntityId     String
+  /// Borrower wallet — vehicle owner at time of LoanReg (from on-chain state).
+  borrowerWallet     String
+  amount             Decimal    @db.Decimal(36, 0)
+  /// Loan duration in months (Solidity Loan.tenure: uint16)
+  tenure             Int        @default(0)
+  status             LoanStatus @default(ACTIVE)
+  disbursedAt        DateTime
+  clearedAt          DateTime?
+  /// Whether NOC has been issued (Solidity Loan.nocIssued: bool)
+  nocIssued          Boolean    @default(false)
+  /// Timestamp when NOC was issued (Solidity Loan.nocDate: uint32)
+  nocDate            DateTime?
+  /// Raw wallet of the NOC NFT recipient (NOCIssued: owner param — may differ from original borrower)
+  nocRecipientWallet String?
+
+  /// The specific B2B bank member who registered/disbursed this loan
+  createdByMemberId  String?
+  /// Resolved Citizen borrower (LoanReg: current vehicle owner = borrower)
+  borrowerUserId     String?
+  /// Resolved Citizen who received the NOC NFT (NOCIssued: owner param)
+  nocRecipientUserId String?
+
+  // Relations
+  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  lenderEntity    B2BEntity        @relation("LenderEntity", fields: [lenderEntityId], references: [id])
+  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
+  loanBorrower    User?            @relation("LoanBorrower", fields: [borrowerUserId], references: [id])
+  nocRecipient    User?            @relation("NocRecipient", fields: [nocRecipientUserId], references: [id])
+  transactions    BlockchainTransaction[]
+
+  @@index([ownTid])
+  @@index([borrowerWallet])
+  @@index([borrowerUserId])
+  @@index([status])
+  @@map("loan_records")
+}
+
+// ============================================================
+// OUTBOX PATTERN - BLOCKCHAIN TRANSACTIONS
+// ============================================================
+
+/// Tracks every single blockchain transaction initiated by the backend.
+/// Replaces the old `syncStatus` field to allow entities to have multiple transactions over their lifecycle.
+model BlockchainTransaction {
+  id             String       @id @default(cuid())
+  txHash         String       @unique
+  actionType     TxActionType
+  status         SyncStatus   @default(PENDING)
+  blockNumber    BigInt?
+  blockTimestamp DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Strict Referential Integrity Foreign Keys — asset being acted upon
+  b2bEntityId    String?
+  passportId     String?
+  ownershipId    String?
+  transferReqId  String?
+  tradeCertId    String?
+  challanId      String?
+  insuranceId    String?
+  pucId          String?
+  loanId         String?
+
+  /// B2B staff member who submitted this tx via the backend API.
+  /// Used by the Indexer/Worker to notify the initiator on MINED/FAILED.
+  initiatorMemberId String?
+
+  /// B2C citizen who submitted this tx directly via MetaMask.
+  /// Resolved by the Indexer from the on-chain wallet address.
+  initiatorUserId   String?
+
+  // Relations — assets
+  b2bEntity      B2BEntity?        @relation(fields: [b2bEntityId], references: [id], onDelete: Cascade)
+  passport       VehiclePassport?  @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  ownership      VehicleOwnership? @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  transferReq    TransferRequest?  @relation(fields: [transferReqId], references: [id], onDelete: Cascade)
+  tradeCert      TradeCert?        @relation(fields: [tradeCertId], references: [id], onDelete: Cascade)
+  challan        Challan?          @relation(fields: [challanId], references: [id], onDelete: Cascade)
+  insurance      InsurancePolicy?  @relation(fields: [insuranceId], references: [id], onDelete: Cascade)
+  puc            PucCertificate?   @relation(fields: [pucId], references: [id], onDelete: Cascade)
+  loan           LoanRecord?       @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  // Relations — initiators
+  initiatorMember B2BMember? @relation("InitiatedTransactions", fields: [initiatorMemberId], references: [id], onDelete: SetNull)
+  initiatorUser   User?      @relation("InitiatedTransactions", fields: [initiatorUserId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([actionType])
+  @@index([initiatorMemberId])
+  @@index([initiatorUserId])
+  @@map("blockchain_transactions")
+}
+
+// ============================================================
+// INDEXER STATE
+// ============================================================
+
+/// Tracks the last successfully indexed block per smart contract.
+/// Allows the indexer to resume from where it left off after restarts.
+model IndexerState {
+  id              String   @id @default(cuid())
+  /// Human-readable contract name (e.g., "OwnershipToken", "ChallanContract").
+  contractName    String   @unique
+  contractAddress String
+  /// The last block number that was fully processed.
+  lastBlock       BigInt   @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@index([contractName])
+  @@map("indexer_state")
 }

@@ -5,8 +5,11 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // The Prisma CLI (migrations) requires a direct connection to Supabase (Port 5432).
+    // The actual application uses DATABASE_URL (Port 6543) via the custom pg adapter in src/lib/prisma.ts
+    url: env("DIRECT_URL"),
   },
 });

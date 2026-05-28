@@ -36,11 +36,11 @@ export function httpLogger(req: Request, res: Response, next: NextFunction): voi
       duration,
       ip: req.context?.realIP ?? req.ip,
       requestId: req.context?.requestId,
-      userId: req.caller?.userId,
-      identity: req.caller?.email,
-      orgId: req.caller?.memberId,
+      userId: req.caller?.sub,
+      identity: req.caller?.email || req.caller?.wallet,
+      orgId: req.caller?.entityId,
       userAgent: req.headers['user-agent'],
-    }, `${req.method} ${sanitizedUrl} ${status} ${duration}ms ident=${req.caller?.email || 'anonymous'}`);
+    }, `${req.method} ${sanitizedUrl} ${status} ${duration}ms ident=${req.caller?.email || req.caller?.wallet || 'anonymous'}`);
   });
 
   next();

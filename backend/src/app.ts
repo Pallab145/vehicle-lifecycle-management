@@ -7,6 +7,7 @@ import { securityHeaders } from '@/middlewares/securityHeaders';
 import { requestContext } from '@/middlewares/requestContext';
 import { errorHandler } from '@/middlewares/errorHandler';
 import apiRoutes from '@/routes';
+import { globalRateLimit } from '@/middlewares/rate-limit';
 
 export function createApp(): express.Application {
     const app = express();
@@ -19,6 +20,9 @@ export function createApp(): express.Application {
 
     // ── 1. Security Headers ───────────────────────────────────────────
     app.use(securityHeaders);
+
+    // ── 1.5 Global Rate Limit ─────────────────────────────────────────
+    app.use(globalRateLimit);
 
     // ── 2. Cookie Parser & Body Parser ────────────────────────────────
     app.use(cookieParser());

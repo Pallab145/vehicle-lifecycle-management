@@ -5,16 +5,25 @@ import { createApp } from './app';
 import { logger } from '@/lib/logger';
 import { env } from '@/config/env';
 import prisma, { disconnectDatabase } from '@/lib/prisma';
+import { initializeWorkers } from '@/lib/worker-init';
+import { workerManager } from '@/lib/worker-manager';
+import { getRedisClient, disconnectRedis } from '@/lib/redis';
 
 // ─── Startup Health Checks ────────────────────────────────────────
 
 async function checkDependencies(): Promise<void> {
   try {
-    // Ping the database to ensure connection is alive
+    // 1. Ping the database to ensure connection is alive
     await prisma.$queryRaw`SELECT 1`;
     logger.info({ event: 'db_connected' }, 'Database connection verified via Prisma');
+
+    // 2. Ping Redis to ensure queue is alive
+    const redis = getRedisClient();
+    await redis.ping();
+    logger.info({ event: 'redis_ping_success' }, 'Redis connection verified via ioredis');
+
   } catch (err) {
-    logger.fatal({ event: 'db_connect_failed', err }, 'Database connection failed — aborting startup');
+    logger.fatal({ event: 'dependency_check_failed', err }, 'Critical infrastructure connection failed — aborting startup');
     process.exit(1);
   }
 }
@@ -39,12 +48,28 @@ async function gracefulShutdown(
   httpServer.close(async () => {
     logger.info({ event: 'http_server_closed' }, 'HTTP server closed');
 
-    // 2. Disconnect Database safely
+    // 2. Shut down background workers gracefully
+    try {
+      await workerManager.shutdown();
+    } catch (err) {
+      logger.error({ event: 'worker_shutdown_error', err }, 'Error during background worker shutdown');
+    }
+
+    // 4. Disconnect Database safely
     try {
       await disconnectDatabase();
       logger.info({ event: 'db_disconnected' }, 'Prisma & pg pool disconnected safely');
     } catch (err) {
       logger.error({ event: 'db_disconnect_error', err }, 'Error disconnecting Prisma');
+    }
+
+    // 5. Disconnect Redis safely
+    try {
+      const { shutdownRedisSubscriber } = await import('@/modules/notification/redisSubscriber');
+      await shutdownRedisSubscriber();
+      await disconnectRedis();
+    } catch (err) {
+      logger.error({ event: 'redis_disconnect_error', err }, 'Error disconnecting Redis');
     }
 
     logger.info({ event: 'shutdown_complete' }, 'Graceful shutdown complete');
@@ -77,11 +102,18 @@ async function bootstrap(): Promise<void> {
   // 1. Verify dependencies before starting
   await checkDependencies();
 
-  // 2. Create HTTP server
+  // 2. Initialize Background Workers
+  await initializeWorkers();
+
+  // 3. Initialize SSE Redis Subscriber
+  const { initRedisSubscriber } = await import('@/modules/notification/redisSubscriber');
+  initRedisSubscriber();
+
+  // 4. Create HTTP server
   const app = createApp();
   const httpServer = createServer(app);
 
-  // 2. Start listening
+  // 4. Start listening
   httpServer.listen(env.PORT, () => {
     logger.info({
       event: 'server_started',
@@ -91,7 +123,7 @@ async function bootstrap(): Promise<void> {
     }, `🚀 API Gateway listening on port ${env.PORT}`);
   });
 
-  // 3. Wire shutdown signals
+  // 5. Wire shutdown signals
   process.on('SIGTERM', () => void gracefulShutdown('SIGTERM', httpServer));
   process.on('SIGINT', () => void gracefulShutdown('SIGINT', httpServer));
 }

@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { logger } from '@/lib/logger';
 import { extractRealIP } from '@/utils/extractRealIP';
 import { env } from '@/config/env';
 import { COOKIE_DEVICE_ID, DEVICE_COOKIE_MAX_AGE } from '@/config/constants';
