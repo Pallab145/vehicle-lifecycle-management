@@ -66,7 +66,7 @@ export const b2bEntityService = {
         // 6. Submit registration to the blockchain using Government Admin credentials
         let txHashStr: string | null = null;
         try {
-            txHashStr = await BlockchainManager.submitAdminTx(input.type, 'REGISTER', [input.code, wallet.address]);
+            txHashStr = await BlockchainManager.submitGovTx(input.type, 'REGISTER', [input.code, wallet.address]);
             
             // Outbox Pattern: Create BlockchainTransaction
             await prisma.blockchainTransaction.create({
@@ -157,7 +157,7 @@ export const b2bEntityService = {
 
         // 3. Submit toggle to blockchain using Government Admin credentials
         try {
-            const txHash = await BlockchainManager.submitAdminTx(entity.type, 'TOGGLE', [entity.code]);
+            const txHash = await BlockchainManager.submitGovTx(entity.type, 'TOGGLE', [entity.code]);
 
             // 4. Outbox Pattern: Track the toggle transaction
             await prisma.blockchainTransaction.create({
@@ -219,7 +219,7 @@ export const b2bEntityService = {
         }
 
         try {
-            const txHash = await BlockchainManager.submitAdminTx(entity.type, 'REGISTER', [entity.code, entity.walletAddress]);
+            const txHash = await BlockchainManager.submitGovTx(entity.type, 'REGISTER', [entity.code, entity.walletAddress]);
 
             await prisma.blockchainTransaction.create({
                 data: {

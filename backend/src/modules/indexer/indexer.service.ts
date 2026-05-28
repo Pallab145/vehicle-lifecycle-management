@@ -2,7 +2,7 @@ import { WebSocketProvider, Contract, type EventLog } from 'ethers';
 import { env } from '@/config/env';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
-import { SyncStatus, TxActionType, VehicleStatus, TransferStatus, ChallanStatus, InsuranceStatus, PucStatus, LoanStatus } from '@/generated/prisma/client';
+import { SyncStatus, TxActionType, VehicleStatus, TransferStatus, ChallanStatus, InsuranceStatus, PucStatus, LoanStatus, RegistrationStatus } from '@/generated/prisma/client';
 import crypto from 'crypto';
 import { dispatcher } from '../notification/notification.dispatcher';
 
@@ -568,6 +568,19 @@ export class IndexerService {
                     where: { id: passport.id },
                     data: { status: VehicleStatus.ACTIVE }
                 });
+
+                // Update RegistrationRequest to APPROVED
+                if (rtoEntity) {
+                    const regReq = await prisma.registrationRequest.findFirst({
+                        where: { dvpId, rtoEntityId: rtoEntity.id, status: RegistrationStatus.PENDING }
+                    });
+                    if (regReq) {
+                        await prisma.registrationRequest.update({
+                            where: { id: regReq.id },
+                            data: { status: RegistrationStatus.APPROVED }
+                        });
+                    }
+                }
             }
 
             await this.finalizeTx(txHash, TxActionType.VEHICLE_REGISTER_RTO, event.blockNumber);
@@ -828,30 +841,52 @@ export class IndexerService {
             const txHash = event.transactionHash;
             logger.info({ challanId: Number(challanId), txHash }, 'Challan: Issued event');
 
-            const [policeEntity, ownership] = await Promise.all([
+            const [policeEntity, ownership, tx] = await Promise.all([
                 prisma.b2BEntity.findFirst({ where: { onChainId: Number(policeId) } }),
-                prisma.vehicleOwnership.findUnique({ where: { ownTid } })
+                prisma.vehicleOwnership.findUnique({ where: { ownTid } }),
+                prisma.blockchainTransaction.findUnique({ where: { txHash } })
             ]);
 
             if (ownership && policeEntity) {
-                const tx = await prisma.blockchainTransaction.findUnique({ where: { txHash } });
-                
-                await prisma.challan.upsert({
-                    where: { challanId },
-                    create: {
-                        challanId,
-                        ownershipId: ownership.id,
-                        policeEntityId: policeEntity.id,
-                        amount: amount.toString(),
-                        status: ChallanStatus.PENDING,
-                        issuedAt: new Date(),
-                        violatorUserId: ownership.ownerUserId,
-                        createdByMemberId: tx?.initiatorMemberId || null
-                    },
-                    update: {
-                        status: ChallanStatus.PENDING
-                    }
-                });
+                // FIX: The service pre-creates a Challan with challanId=null before submitting the tx.
+                // The BlockchainTransaction FK (tx.challanId) points to that pre-created record.
+                // We must UPDATE it rather than upsert-create a duplicate with a new DB row.
+                const preCreatedChallan = tx?.challanId
+                    ? await prisma.challan.findUnique({ where: { id: tx.challanId } })
+                    : null;
+
+                if (preCreatedChallan) {
+                    // Update the pre-created record with the on-chain IDs
+                    await prisma.challan.update({
+                        where: { id: preCreatedChallan.id },
+                        data: {
+                            challanId,
+                            ownTid,
+                            status: ChallanStatus.PENDING
+                        }
+                    });
+                } else {
+                    // Fallback: catch-up phase or orphaned tx — safe to upsert
+                    await prisma.challan.upsert({
+                        where: { challanId },
+                        create: {
+                            challanId,
+                            ownershipId: ownership.id,
+                            policeEntityId: policeEntity.id,
+                            ownTid,
+                            amount: amount.toString(),
+                            status: ChallanStatus.PENDING,
+                            issuedAt: new Date(),
+                            violatorUserId: ownership.ownerUserId,
+                            createdByMemberId: tx?.initiatorMemberId || null
+                        },
+                        update: {
+                            challanId,
+                            ownTid,
+                            status: ChallanStatus.PENDING
+                        }
+                    });
+                }
             }
 
             await this.finalizeTx(txHash, TxActionType.CHALLAN_ISSUE, event.blockNumber);
@@ -918,7 +953,8 @@ export class IndexerService {
                     data: {
                         status: ChallanStatus.CANCELLED,
                         cancelledAt: new Date(),
-                        cancelledByMemberId: tx?.initiatorMemberId || null
+                        cancelledByMemberId: tx?.initiatorMemberId || null,
+                        isAdminCancel: isAdminCancel
                     }
                 });
             }

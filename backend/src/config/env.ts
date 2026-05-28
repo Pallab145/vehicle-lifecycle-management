@@ -54,6 +54,9 @@ const envSchema = z.object({
 
     // Background Workers (Redis / BullMQ)
     REDIS_URL: z.string().url().default('redis://localhost:6379'),
+
+    // Payments
+    PAYMENT_WEBHOOK_SECRET: z.string().default('mock_webhook_secret_dev_only'),
 });
 
 const parsed = envSchema.safeParse(process.env);

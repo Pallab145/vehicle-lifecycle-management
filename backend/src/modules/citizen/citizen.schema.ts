@@ -6,6 +6,8 @@ export const VerifyKycSchema = z.object({
     name: z.string().min(2, 'Name must be at least 2 characters').max(100),
     phone: z.string().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format. Include country code (e.g., +91).'),
     email: z.string().email('Invalid email address').optional(),
+    /// The ID of the RTO this citizen belongs to (chosen from the public RTO list)
+    rtoEntityId: z.string().cuid('Invalid RTO ID format').optional()
 });
 
 export type VerifyKycInput = z.infer<typeof VerifyKycSchema>;

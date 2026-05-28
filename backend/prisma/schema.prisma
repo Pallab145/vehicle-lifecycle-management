@@ -56,6 +56,13 @@ enum TransferStatus {
   CANCELLED // Cancelled by any party or admin
 }
 
+/// Lifecycle state of a vehicle registration request.
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 /// State of a traffic violation challan.
 enum ChallanStatus {
   PENDING // Unpaid
@@ -126,6 +133,13 @@ enum TxActionType {
   LOAN_CLEAR
 }
 
+/// Discriminator for who/what triggered a blockchain transaction submission.
+enum TxSource {
+  MEMBER  // Triggered by a logged-in B2B staff member via the API
+  WEBHOOK // Triggered automatically by a payment webhook (no human member)
+  SYSTEM  // Triggered by a background job or reconciliation worker
+}
+
 // ============================================================
 // AUTH — B2C (Citizens)
 // ============================================================
@@ -139,6 +153,8 @@ model User {
   phone         String?  @unique
   /// KYC status (Aadhaar/DL verification)
   isVerified    Boolean  @default(false)
+  /// The jurisdictional RTO chosen by the citizen during KYC
+  rtoEntityId   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -164,13 +180,21 @@ model User {
   heldVehicles       VehiclePassport[]  @relation("DealerUser")
   /// TradeCerts issued by RTO to this citizen-dealer (TradeCertIssued: dealer param)
   receivedTradeCerts TradeCert[]        @relation("DealerUser")
+  /// Off-chain registration requests where this citizen is the buyer
+  boughtRegistrations RegistrationRequest[] @relation("RegBuyer")
+  /// Off-chain registration requests submitted by this citizen-dealer
+  dealerRegistrations RegistrationRequest[] @relation("RegDealer")
   /// PUC certificates issued to vehicles owned by this citizen
   pucCertificates    PucCertificate[]   @relation("PucOwner")
   /// Blockchain transactions initiated directly by this citizen via MetaMask.
   initiatedTransactions BlockchainTransaction[] @relation("InitiatedTransactions")
 
+  /// The RTO this citizen is registered under (chosen during KYC)
+  rto            B2BEntity? @relation("CitizenRto", fields: [rtoEntityId], references: [id])
+
   @@index([walletAddress])
   @@index([email])
+  @@index([rtoEntityId])
   @@map("users")
 }
 
@@ -209,12 +233,15 @@ model B2BEntity {
   scrappedVehicles     VehiclePassport[]  @relation("ScrapEntity")
   registeredVehicles   VehicleOwnership[] @relation("RtoEntity")
   approvedTransfers    TransferRequest[]  @relation("RtoApproverEntity")
+  registrationRequests RegistrationRequest[] @relation("RtoEntity")
   issuedTradeCerts     TradeCert[]        @relation("RtoIssuedTradeCert")
   issuedChallans       Challan[]          @relation("PoliceEntity")
   issuedPolicies       InsurancePolicy[]  @relation("InsuranceEntity")
   issuedPucCerts       PucCertificate[]   @relation("PucEntity")
   grantedLoans         LoanRecord[]       @relation("LenderEntity")
   transactions         BlockchainTransaction[]
+  /// Citizens who selected this RTO during KYC
+  registeredCitizens   User[]             @relation("CitizenRto")
 
   @@index([type])
   @@index([walletAddress])
@@ -367,6 +394,9 @@ model VehiclePassport {
   /// B2B entity of type SCRAP_CENTER.
   scrapEntityId String?
   scrapDate     DateTime?
+  
+  /// Pending off-chain registration request
+  registrationRequest RegistrationRequest?
 
   /// The specific B2B Manufacturer member who called manufacture()
   createdByMemberId String?
@@ -479,6 +509,31 @@ model TransferRequest {
   @@map("transfer_requests")
 }
 
+/// Off-chain registration requests submitted by Dealers to RTOs
+model RegistrationRequest {
+  id            String             @id @default(cuid())
+  dvpId         BigInt
+  passportId    String             @unique
+  buyerWallet   String
+  dealerWallet  String
+  buyerUserId   String?
+  dealerUserId  String?
+  rtoEntityId   String
+  status        RegistrationStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  passport      VehiclePassport    @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  rto           B2BEntity          @relation("RtoEntity", fields: [rtoEntityId], references: [id], onDelete: Cascade)
+  buyerUser     User?              @relation("RegBuyer", fields: [buyerUserId], references: [id])
+  dealerUser    User?              @relation("RegDealer", fields: [dealerUserId], references: [id])
+
+  @@index([dealerWallet])
+  @@index([rtoEntityId])
+  @@index([status])
+  @@map("registration_requests")
+}
+
 /// Dealer trade certificates issued by RTO from OwnershipToken contract.
 /// Indexed from: TradeCertIssued, TradeCertRevoked events.
 /// A DEALER must hold a valid TradeCert before RTO can register a vehicle for first sale.
@@ -536,6 +591,12 @@ model Challan {
   cancelledByMemberId String?
   /// Resolved Citizen who owned the vehicle AT THE TIME the challan was issued (historical audit)
   violatorUserId      String?
+
+  /// Unique payment gateway order ID (e.g. Razorpay order_id) created when citizen initiates payment.
+  /// Used by webhook to locate the correct Challan record.
+  paymentOrderId      String?  @unique
+  /// Optional payment reference/transaction ID returned by the gateway after successful payment.
+  paymentRef          String?
 
   // Relations
   ownership         VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
@@ -710,7 +771,11 @@ model BlockchainTransaction {
 
   /// B2B staff member who submitted this tx via the backend API.
   /// Used by the Indexer/Worker to notify the initiator on MINED/FAILED.
+  /// NULL when txSource is WEBHOOK or SYSTEM.
   initiatorMemberId String?
+
+  /// Discriminates how this transaction was triggered for audit purposes.
+  txSource          TxSource @default(MEMBER)
 
   /// B2C citizen who submitted this tx directly via MetaMask.
   /// Resolved by the Indexer from the on-chain wallet address.

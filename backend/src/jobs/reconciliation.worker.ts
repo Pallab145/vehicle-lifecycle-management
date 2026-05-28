@@ -14,6 +14,7 @@ import {
     InsuranceStatus, 
     PucStatus, 
     LoanStatus,
+    RegistrationStatus,
     type BlockchainTransaction, 
     type B2BEntity 
 } from '@/generated/prisma/client';
@@ -238,7 +239,7 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
                 });
             }
         }
-        else if (tx.actionType === TxActionType.VEHICLE_REGISTER_RTO && tx.ownershipId) {
+        else if (tx.actionType === TxActionType.VEHICLE_REGISTER_RTO && tx.passportId) {
             const event = events.get('VehicleReg');
             if (event) {
                 const ownTid = event.args[0];
@@ -248,22 +249,44 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
                     where: { walletAddress: owner }
                 });
                 
-                const updatedOwnership = await db.vehicleOwnership.update({
-                    where: { id: tx.ownershipId },
+                // 1. Create the initial VehicleOwnership record
+                await db.vehicleOwnership.create({
                     data: {
                         ownTid: Number(ownTid),
                         dvpId: Number(dvpId),
-                        isActive: true,
-                        ownerUserId: ownerUser?.id || null
+                        passportId: tx.passportId,
+                        ownerWallet: owner,
+                        ownerUserId: ownerUser?.id || null,
+                        rtoEntityId: tx.b2bEntityId!,
+                        regDate: new Date(),
+                        isActive: true
                     }
                 });
 
+                // 2. Mark the passport as ACTIVE
                 await db.vehiclePassport.update({
-                    where: { id: updatedOwnership.passportId },
+                    where: { id: tx.passportId },
                     data: {
                         status: VehicleStatus.ACTIVE
                     }
                 });
+
+                // 3. Mark the RegistrationRequest as APPROVED off-chain
+                if (tx.b2bEntityId) {
+                    const regReq = await db.registrationRequest.findFirst({
+                        where: { 
+                            dvpId: Number(dvpId), 
+                            rtoEntityId: tx.b2bEntityId, 
+                            status: RegistrationStatus.PENDING 
+                        }
+                    });
+                    if (regReq) {
+                        await db.registrationRequest.update({
+                            where: { id: regReq.id },
+                            data: { status: RegistrationStatus.APPROVED }
+                        });
+                    }
+                }
             }
         }
         else if (tx.actionType === TxActionType.TRANSFER_INIT && tx.transferReqId) {
@@ -570,8 +593,11 @@ async function handleRevertedRollback(tx: BlockchainTransaction) {
             }).catch(() => {});
         }
         else if (tx.actionType === TxActionType.TRADE_CERT_ISSUE && tx.tradeCertId) {
-            logger.warn({ tradeCertId: tx.tradeCertId }, 'Saga Rollback: Deleting TradeCert.');
-            await db.tradeCert.delete({ where: { id: tx.tradeCertId } }).catch(() => {});
+            logger.warn({ tradeCertId: tx.tradeCertId }, 'Saga Rollback: Deactivating TradeCert.');
+            await db.tradeCert.update({ 
+                where: { id: tx.tradeCertId },
+                data: { isActive: false } 
+            }).catch(() => {});
         }
         else if (tx.actionType === TxActionType.TRADE_CERT_REVOKE && tx.tradeCertId) {
             logger.warn({ tradeCertId: tx.tradeCertId }, 'Saga Rollback: Reverting TradeCert revocation.');
@@ -586,6 +612,23 @@ async function handleRevertedRollback(tx: BlockchainTransaction) {
         }
         else if (tx.actionType === TxActionType.CHALLAN_PAY && tx.challanId) {
             logger.warn({ challanId: tx.challanId }, 'Saga Rollback: Reverting Challan payment.');
+
+            // Fetch challan to check if payment was already collected (web2 gateway)
+            const challan = await db.challan.findUnique({ where: { id: tx.challanId } }).catch(() => null);
+            if (challan?.paymentRef) {
+                // CRITICAL: The citizen's money was collected (web2 payment confirmed, paymentRef is set)
+                // but the blockchain tx reverted. Manual investigation required!
+                // paymentRef is intentionally NOT cleared — it is evidence of the received payment.
+                logger.error({
+                    challanId: tx.challanId,
+                    txHash: tx.txHash,
+                    txSource: tx.txSource,
+                    paymentRef: challan.paymentRef,
+                    paymentOrderId: challan.paymentOrderId
+                }, 'SAGA ALERT: CHALLAN_PAY reverted on-chain but web2 payment was already collected. ' +
+                   'paymentRef preserved. MANUAL INTERVENTION REQUIRED to refund the citizen.');
+            }
+
             await db.challan.update({
                 where: { id: tx.challanId },
                 data: { status: ChallanStatus.PENDING, paidAt: null }

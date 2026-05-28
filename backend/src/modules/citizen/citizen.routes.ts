@@ -8,7 +8,14 @@ const router = Router();
 // Apply a strict rate limit for KYC verification endpoints to prevent API abuse/spamming
 const kycRateLimit = createServiceRateLimit('kyc-verification');
 
-// All citizen routes require a valid JWT (User must be logged in)
+/**
+ * @route   GET /api/citizens/rtos
+ * @desc    List all active RTOs for the citizen selection dropdown
+ * @access  Public (no auth required — needed before login to choose RTO)
+ */
+router.get('/rtos', citizenController.listRtos);
+
+// All citizen routes below require a valid JWT (User must be logged in)
 router.use(requireAuth);
 
 /**

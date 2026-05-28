@@ -50,5 +50,17 @@ export const citizenController = {
             success: true,
             citizen: user
         });
+    }),
+
+    /**
+     * GET /api/citizens/rtos
+     * Public endpoint — returns list of all active RTOs for the selection dropdown.
+     */
+    listRtos: asyncHandler(async (_req: Request, res: Response) => {
+        const rtos = await citizenService.listActiveRtos();
+        res.status(200).json({
+            success: true,
+            rtos
+        });
     })
 };
