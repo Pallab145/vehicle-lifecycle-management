@@ -11,3 +11,22 @@ export const VerifyKycSchema = z.object({
 });
 
 export type VerifyKycInput = z.infer<typeof VerifyKycSchema>;
+
+export const dvpIdParamSchema = z.object({
+    params: z.object({
+        dvpId: z.string().regex(/^\d+$/, 'DVP ID must be a numeric string')
+    })
+});
+
+export const ownTidParamSchema = z.object({
+    params: z.object({
+        ownTid: z.string().regex(/^\d+$/, 'Ownership Token ID must be a numeric string')
+    })
+});
+
+export const listVehiclesQuerySchema = z.object({
+    query: z.object({
+        page: z.string().regex(/^\d+$/).optional().transform(val => (val ? parseInt(val, 10) : 1)),
+        limit: z.string().regex(/^\d+$/).optional().transform(val => (val ? parseInt(val, 10) : 10))
+    })
+});

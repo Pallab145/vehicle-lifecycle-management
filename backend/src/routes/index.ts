@@ -12,6 +12,11 @@ import { dealerRoutes } from '@/modules/dealer/dealer.routes';
 import policeRoutes from '@/modules/police/police.routes';
 import paymentRoutes from '@/modules/payment/payment.routes';
 import govRoutes from '@/modules/gov/gov.routes';
+import bankRoutes from '@/modules/bank/bank.routes';
+import adminRoutes from '@/modules/admin/admin.routes';
+import insuranceRoutes from '@/modules/insurance/insurance.routes';
+import { pucRoutes } from '@/modules/puc/puc.routes';
+import scrapRoutes from '@/modules/scrap/scrap.routes';
 
 const router = Router();
 
@@ -32,5 +37,10 @@ router.use('/dealer', dealerRoutes);
 router.use('/police', policeRoutes);
 router.use('/payment', paymentRoutes);
 router.use('/gov', govRoutes);
+router.use('/bank', bankRoutes);
+router.use('/admin', adminRoutes);
+router.use('/insurance', insuranceRoutes);
+router.use('/puc', pucRoutes);
+router.use('/scrap', scrapRoutes);
 
 export default router;

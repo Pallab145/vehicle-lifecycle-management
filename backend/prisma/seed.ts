@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { EntityType, MemberRole, Prisma, SyncStatus } from '../src/generated/prisma/client';
+import { EntityType, MemberRole, Prisma } from '../src/generated/prisma/client';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import prisma from '../src/lib/prisma';
@@ -34,32 +34,40 @@ async function main() {
     console.log('🌱 Starting database seed for Vehicle Lifecycle Management System...\n');
 
     // 1. Validate required environment variables directly from process.env
-    const adminEmail = process.env.SEED_ADMIN_EMAIL;
-    const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-    const adminWalletAddress = process.env.SEED_ADMIN_WALLET_ADDRESS;
-    const adminPrivateKey = process.env.SEED_ADMIN_PRIVATE_KEY;
+    const govAdminPrivateKey = process.env.GOV_ADMIN_PRIVATE_KEY; // Used for the relayer/MORTH-HQ signing key
+    const govAdminWallet = process.env.GOV_ADMIN_WALLET_ADDRESS;
     const masterAdminKey = process.env.MASTER_ADMIN_KEY; // Must match the one in env.ts
     const chainId = process.env.CHAIN_ID;
+    const admin1Wallet = process.env.MORTH_ADMIN_1_WALLET;
+    const admin2Wallet = process.env.MORTH_ADMIN_2_WALLET;
+    const admin3Wallet = process.env.MORTH_ADMIN_3_WALLET;
+    const admin1Email = process.env.MORTH_ADMIN_1_EMAIL;
+    const admin2Email = process.env.MORTH_ADMIN_2_EMAIL;
+    const admin3Email = process.env.MORTH_ADMIN_3_EMAIL;
 
-    if (!adminEmail || !adminPassword || !adminWalletAddress || !adminPrivateKey || !masterAdminKey || !chainId) {
+    if (!govAdminPrivateKey || !govAdminWallet || !masterAdminKey || !chainId || !admin1Wallet || !admin2Wallet || !admin3Wallet || !admin1Email || !admin2Email || !admin3Email) {
         console.error('❌ ERROR: Missing required environment variables for seeding.');
         console.error('Please ensure the following are set in your environment (e.g., .env file):');
-        console.error('  - SEED_ADMIN_EMAIL');
-        console.error('  - SEED_ADMIN_PASSWORD');
-        console.error('  - SEED_ADMIN_WALLET_ADDRESS');
-        console.error('  - SEED_ADMIN_PRIVATE_KEY');
+        console.error('  - GOV_ADMIN_PRIVATE_KEY');
+        console.error('  - GOV_ADMIN_WALLET_ADDRESS');
         console.error('  - MASTER_ADMIN_KEY');
         console.error('  - CHAIN_ID');
+        console.error('  - MORTH_ADMIN_1_WALLET');
+        console.error('  - MORTH_ADMIN_2_WALLET');
+        console.error('  - MORTH_ADMIN_3_WALLET');
+        console.error('  - MORTH_ADMIN_1_EMAIL');
+        console.error('  - MORTH_ADMIN_2_EMAIL');
+        console.error('  - MORTH_ADMIN_3_EMAIL');
         process.exit(1);
     }
 
-    // Basic format validation
-    if (adminWalletAddress.length !== 42 || !adminWalletAddress.startsWith('0x')) {
-        console.error('❌ ERROR: SEED_ADMIN_WALLET_ADDRESS must be a valid 42-character Ethereum address (starting with 0x).');
+    if (govAdminPrivateKey.length !== 66 || !govAdminPrivateKey.startsWith('0x')) {
+        console.error('❌ ERROR: GOV_ADMIN_PRIVATE_KEY must be a valid 66-character Ethereum private key (starting with 0x).');
         process.exit(1);
     }
-    if (adminPrivateKey.length !== 66 || !adminPrivateKey.startsWith('0x')) {
-        console.error('❌ ERROR: SEED_ADMIN_PRIVATE_KEY must be a valid 66-character Ethereum private key (starting with 0x).');
+    
+    if (govAdminWallet.length !== 42 || !govAdminWallet.startsWith('0x')) {
+        console.error('❌ ERROR: GOV_ADMIN_WALLET_ADDRESS must be a valid 42-character Ethereum address (starting with 0x).');
         process.exit(1);
     }
 
@@ -83,33 +91,51 @@ async function main() {
                     type: EntityType.GOVERNMENT,
                     code: 'MORTH-HQ',
                     name: 'Ministry of Road Transport and Highways',
-                    walletAddress: adminWalletAddress,
+                    walletAddress: govAdminWallet, // The EOA wallet that pays gas/submits txs (Relayer)
                     onChainId: 0,
                 }
             });
 
-            console.log(`👤 Creating Super Admin User (${adminEmail})...`);
-            const passwordHash = await bcrypt.hash(adminPassword, 10);
-            const superAdmin = await tx.b2BMember.create({
-                data: {
-                    entityId: rootEntity.id,
-                    email: adminEmail,
-                    name: 'System Administrator',
-                    passwordHash: passwordHash,
-                    role: MemberRole.OWNER,
-                    isActive: true,
-                }
-            });
+            console.log(`👤 Creating 3 Gnosis Safe Admin Owners...`);
+            
+            // The 3 owners of the deployed Gnosis Safe
+            const safeOwners = [
+                { email: admin1Email, name: 'MoRTH Admin 1', walletAddress: admin1Wallet, password: '' },
+                { email: admin2Email, name: 'MoRTH Admin 2', walletAddress: admin2Wallet, password: '' },
+                { email: admin3Email, name: 'MoRTH Admin 3', walletAddress: admin3Wallet, password: '' },
+            ];
 
-            console.log('🔐 Encrypting and Storing Root Signing Key...');
-            const encryptedPrivateKey = encryptAES256GCM(adminPrivateKey, masterAdminKey);
+            const createdAdmins = [];
+            for (const owner of safeOwners) {
+                // Generate a unique password for each admin
+                owner.password = crypto.randomBytes(8).toString('hex');
+                const passwordHash = await bcrypt.hash(owner.password, 10);
+
+                const admin = await tx.b2BMember.create({
+                    data: {
+                        entityId: rootEntity.id,
+                        email: owner.email,
+                        name: owner.name,
+                        passwordHash: passwordHash,
+                        role: MemberRole.OWNER,
+                        isActive: true,
+                        walletAddress: owner.walletAddress,
+                    }
+                });
+                createdAdmins.push(admin);
+                console.log(`   ✅ Created ${owner.name} (${owner.email}) - ${owner.walletAddress}`);
+            }
+
+            console.log('🔐 Encrypting and Storing Root Relayer Signing Key...');
+            // This is the relayer key used to submit the execTransaction
+            const encryptedPrivateKey = encryptAES256GCM(govAdminPrivateKey, masterAdminKey);
             await tx.entitySigningKey.create({
                 data: {
                     entityId: rootEntity.id,
                     encryptedPrivateKey: encryptedPrivateKey,
-                    publicKey: adminWalletAddress,
+                    publicKey: govAdminWallet, // Use the provided gov admin wallet instead of "RELAYER_KEY"
                     algorithm: 'AES-256-GCM',
-                    createdById: superAdmin.id,
+                    createdById: createdAdmins[0].id,
                 }
             });
 
@@ -125,9 +151,10 @@ async function main() {
                 const insuranceAddr = process.env.CONTRACT_INSURANCE_ADDRESS;
                 const pucAddr = process.env.CONTRACT_PUC_ADDRESS;
                 const loanAddr = process.env.CONTRACT_LOAN_ADDRESS;
+                const safeAddr = process.env.MORTH_GNOSIS_SAFE_ADDRESS;
 
-                if (!dvpAddr || !ownershipAddr || !challanAddr || !insuranceAddr || !pucAddr || !loanAddr) {
-                    throw new Error('Missing contract address env variables (CONTRACT_DVP_ADDRESS, CONTRACT_OWNERSHIP_ADDRESS, etc.) required for IndexerState seeding.');
+                if (!dvpAddr || !ownershipAddr || !challanAddr || !insuranceAddr || !pucAddr || !loanAddr || !safeAddr) {
+                    throw new Error('Missing contract address env variables (CONTRACT_DVP_ADDRESS, MORTH_GNOSIS_SAFE_ADDRESS, etc.) required for IndexerState seeding.');
                 }
 
                 const contracts = [
@@ -136,7 +163,9 @@ async function main() {
                     { name: 'ChallanContract', address: challanAddr },
                     { name: 'InsuranceToken', address: insuranceAddr },
                     { name: 'PUCToken', address: pucAddr },
-                    { name: 'LoanContract', address: loanAddr }
+                    { name: 'LoanContract', address: loanAddr },
+                    // GnosisSafe — tracked for ExecutionSuccess / ExecutionFailure events
+                    { name: 'GnosisSafe', address: safeAddr }
                 ];
 
                 for (const contract of contracts) {
@@ -158,9 +187,14 @@ async function main() {
             console.log('\n✅ Seed completed successfully!');
             console.log('----------------------------------------------------');
             console.log(`Entity Code : ${rootEntity.code}`);
-            console.log(`Admin Email : ${superAdmin.email}`);
-            console.log(`Wallet      : ${rootEntity.walletAddress}`);
+            console.log(`Entity Type : ${rootEntity.type}`);
+            console.log(`Safe Address: ${rootEntity.walletAddress}`);
             console.log(`Chain ID    : ${chainId}`);
+            console.log('Admins      :');
+            createdAdmins.forEach((a, i) => {
+                console.log(`  ${i+1}. ${a.email} (${a.walletAddress})`);
+                console.log(`     🔑 Password: ${safeOwners[i].password}`);
+            });
             console.log('----------------------------------------------------');
         });
     } catch (error) {

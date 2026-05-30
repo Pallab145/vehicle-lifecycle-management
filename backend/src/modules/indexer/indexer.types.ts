@@ -16,4 +16,5 @@ export type BlockchainEventType =
     | 'PoliceReg' | 'PoliceStatusToggled'
     | 'InsReg' | 'InsStatusToggled'
     | 'CenterReg' | 'CenterStatusToggled'
-    | 'BankReg' | 'BankStatusToggled';
+    | 'BankReg' | 'BankStatusToggled'
+    | 'ExecutionSuccess' | 'ExecutionFailure';

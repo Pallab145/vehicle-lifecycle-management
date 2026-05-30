@@ -2,7 +2,7 @@ import { WebSocketProvider, Contract, type EventLog } from 'ethers';
 import { env } from '@/config/env';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
-import { SyncStatus, TxActionType, VehicleStatus, TransferStatus, ChallanStatus, InsuranceStatus, PucStatus, LoanStatus, RegistrationStatus } from '@/generated/prisma/client';
+import { SyncStatus, TxActionType, VehicleStatus, TransferStatus, ChallanStatus, InsuranceStatus, PucStatus, LoanStatus, RegistrationStatus, SafeProposalStatus } from '@/generated/prisma/client';
 import crypto from 'crypto';
 import { dispatcher } from '../notification/notification.dispatcher';
 
@@ -12,6 +12,7 @@ import ChallanAbi from '@/abi/ChallanContract.json';
 import InsuranceAbi from '@/abi/InsuranceToken.json';
 import PucAbi from '@/abi/PUCToken.json';
 import LoanAbi from '@/abi/LoanContract.json';
+import SafeAbi from '@/abi/Safe.json';
 import type { NotificationEvent } from '../notification/notification.types';
 export class IndexerService {
     private provider: WebSocketProvider;
@@ -63,6 +64,8 @@ export class IndexerService {
         const insuranceContract = new Contract(env.CONTRACT_INSURANCE_ADDRESS, InsuranceAbi, this.provider);
         const pucContract = new Contract(env.CONTRACT_PUC_ADDRESS, PucAbi, this.provider);
         const loanContract = new Contract(env.CONTRACT_LOAN_ADDRESS, LoanAbi, this.provider);
+        // Gnosis Safe — only ExecutionSuccess / ExecutionFailure events are relevant
+        const safeContract = new Contract(env.MORTH_GNOSIS_SAFE_ADDRESS, SafeAbi, this.provider);
 
         // --- CATCH UP PHASE ---
         try {
@@ -75,7 +78,8 @@ export class IndexerService {
             await this.catchUpContract(insuranceContract, 'InsuranceToken', latestBlock);
             await this.catchUpContract(pucContract, 'PUCToken', latestBlock);
             await this.catchUpContract(loanContract, 'LoanContract', latestBlock);
-            
+            await this.catchUpContract(safeContract, 'GnosisSafe', latestBlock);
+
             logger.info('Catch-Up Phase Complete. Binding live WebSocket listeners...');
         } catch (err) {
             logger.error({ err }, 'Failed during Catch-Up Phase. Will retry...');
@@ -127,6 +131,7 @@ export class IndexerService {
         dvpContract.on('StatusChange', async (tokenId, oldStatus, newStatus, ev) => { await this.handleStatusChange(tokenId, oldStatus, newStatus, ev); await this.advanceCursor('DigitalVehiclePassport', ev.blockNumber); });
         dvpContract.on('VehicleScrapped', async (tokenId, scrapId, scrapDate, ev) => { await this.handleVehicleScrapped(tokenId, scrapId, scrapDate, ev); await this.advanceCursor('DigitalVehiclePassport', ev.blockNumber); });
         dvpContract.on('VehicleAssignedToDealer', async (tokenId, mfgId, dealer, assignedDate, ev) => { await this.handleVehicleAssignedToDealer(tokenId, mfgId, dealer, assignedDate, ev); await this.advanceCursor('DigitalVehiclePassport', ev.blockNumber); });
+        dvpContract.on('ScrapAuthorized', async (tokenId, scrapId, owner, ev) => { await this.handleScrapAuthorized(tokenId, scrapId, owner, ev); await this.advanceCursor('DigitalVehiclePassport', ev.blockNumber); });
 
         // ─── OWNERSHIP OPERATIONAL EVENTS ───
         ownershipContract.on('VehicleReg', async (ownTid, owner, rtoId, dvpId, ev) => { await this.handleVehicleReg(ownTid, owner, rtoId, dvpId, ev); await this.advanceCursor('OwnershipToken', ev.blockNumber); });
@@ -146,14 +151,38 @@ export class IndexerService {
         insuranceContract.on('PolicyIssued', async (polId, ownTid, compId, expiry, ev) => { await this.handlePolicyIssued(polId, ownTid, compId, expiry, ev); await this.advanceCursor('InsuranceToken', ev.blockNumber); });
         insuranceContract.on('PolicyExpired', async (polId, ev) => { await this.handlePolicyExpired(polId, ev); await this.advanceCursor('InsuranceToken', ev.blockNumber); });
         insuranceContract.on('ClaimFiled', async (polId, claimNum, ev) => { await this.handleClaimFiled(polId, claimNum, ev); await this.advanceCursor('InsuranceToken', ev.blockNumber); });
+        insuranceContract.on('PolicyTerminated', async (polId, ownTid, ev) => { await this.handlePolicyTerminated(polId, ownTid, ev); await this.advanceCursor('InsuranceToken', ev.blockNumber); });
 
         // ─── PUC OPERATIONAL EVENTS ───
         pucContract.on('PUCIssued', async (certId, ownTid, passed, expiry, ev) => { await this.handlePucIssued(certId, ownTid, passed, expiry, ev); await this.advanceCursor('PUCToken', ev.blockNumber); });
         pucContract.on('PUCExpired', async (certId, ev) => { await this.handlePucExpired(certId, ev); await this.advanceCursor('PUCToken', ev.blockNumber); });
+        pucContract.on('PUCTerminated', async (certId, ownTid, ev) => { await this.handlePucTerminated(certId, ownTid, ev); await this.advanceCursor('PUCToken', ev.blockNumber); });
 
         // ─── LOAN OPERATIONAL EVENTS ───
-        loanContract.on('LoanReg', async (loanId, ownTid, bankId, amount, ev) => { await this.handleLoanReg(loanId, ownTid, bankId, amount, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
-        loanContract.on('NOCIssued', async (loanId, ownTid, owner, ev) => { await this.handleNocIssued(loanId, ownTid, owner, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: LoanReg(uint64 loanId, uint256 dvpId, uint64 bankId, address borrower, uint128 amount)
+        loanContract.on('LoanReg', async (loanId, dvpId, bankId, borrower, amount, ev) => { await this.handleLoanReg(loanId, dvpId, bankId, borrower, amount, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: NOCIssued(uint64 loanId, uint256 dvpId)  — only 2 params; owner comes from NOCMinted
+        loanContract.on('NOCIssued', async (loanId, dvpId, ev) => { await this.handleNocIssued(loanId, dvpId, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: NOCMinted(uint64 loanId, address owner)  — minted only for registered vehicles
+        loanContract.on('NOCMinted', async (loanId, owner, ev) => { await this.handleNocMinted(loanId, owner, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: LoanRefinanced(uint64 oldLoanId, uint64 newLoanId, uint256 dvpId)
+        loanContract.on('LoanRefinanced', async (oldLoanId, newLoanId, dvpId, ev) => { await this.handleLoanRefinanced(oldLoanId, newLoanId, dvpId, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: PendingLoanAttached(uint256 dvpId, uint64 bankId, address borrower, uint128 amount)
+        loanContract.on('PendingLoanAttached', async (dvpId, bankId, borrower, amount, ev) => { await this.handlePendingLoanAttached(dvpId, bankId, borrower, amount, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+        // ABI: PendingLoanCancelled(uint256 dvpId, uint64 bankId)
+        loanContract.on('PendingLoanCancelled', async (dvpId, bankId, ev) => { await this.handlePendingLoanCancelled(dvpId, bankId, ev); await this.advanceCursor('LoanContract', ev.blockNumber); });
+
+        // ─── GNOSIS SAFE GOVERNANCE EVENTS ───
+        // ExecutionSuccess(bytes32 txHash, uint256 payment)
+        // The safeTxHash emitted is the EIP-712 Safe tx hash — maps 1:1 to SafeProposal.safeTxHash.
+        safeContract.on('ExecutionSuccess', async (safeTxHash: string, _payment: bigint, ev: EventLog) => {
+            await this.handleSafeExecutionSuccess(safeTxHash, ev);
+            await this.advanceCursor('GnosisSafe', ev.blockNumber);
+        });
+        safeContract.on('ExecutionFailure', async (safeTxHash: string, _payment: bigint, ev: EventLog) => {
+            await this.handleSafeExecutionFailure(safeTxHash, ev);
+            await this.advanceCursor('GnosisSafe', ev.blockNumber);
+        });
 
         logger.info('Blockchain Indexer is now listening for events');
     }
@@ -166,6 +195,7 @@ export class IndexerService {
             case 'InsuranceToken': return env.CONTRACT_INSURANCE_ADDRESS;
             case 'PUCToken': return env.CONTRACT_PUC_ADDRESS;
             case 'LoanContract': return env.CONTRACT_LOAN_ADDRESS;
+            case 'GnosisSafe': return env.MORTH_GNOSIS_SAFE_ADDRESS;
             default: return '0x0000000000000000000000000000000000000000';
         }
     }
@@ -232,6 +262,7 @@ export class IndexerService {
             case 'VehicleMfg': return this.handleVehicleMfg(args[0], args[1], args[2], ev);
             case 'StatusChange': return this.handleStatusChange(args[0], args[1], args[2], ev);
             case 'VehicleScrapped': return this.handleVehicleScrapped(args[0], args[1], args[2], ev);
+            case 'ScrapAuthorized': return this.handleScrapAuthorized(args[0], args[1], args[2] as string, ev);
             case 'VehicleAssignedToDealer': return this.handleVehicleAssignedToDealer(args[0], args[1], args[2], args[3], ev);
             
             case 'VehicleReg': return this.handleVehicleReg(args[0], args[1], args[2], args[3], ev);
@@ -249,12 +280,22 @@ export class IndexerService {
             case 'PolicyIssued': return this.handlePolicyIssued(args[0], args[1], args[2], args[3], ev);
             case 'PolicyExpired': return this.handlePolicyExpired(args[0], ev);
             case 'ClaimFiled': return this.handleClaimFiled(args[0], args[1], ev);
+            case 'PolicyTerminated': return this.handlePolicyTerminated(args[0], args[1], ev);
             
             case 'PUCIssued': return this.handlePucIssued(args[0], args[1], args[2], args[3], ev);
             case 'PUCExpired': return this.handlePucExpired(args[0], ev);
+            case 'PUCTerminated': return this.handlePucTerminated(args[0], args[1], ev);
             
-            case 'LoanReg': return this.handleLoanReg(args[0], args[1], args[2], args[3], ev);
-            case 'NOCIssued': return this.handleNocIssued(args[0], args[1], args[2], ev);
+            case 'LoanReg':    return this.handleLoanReg(args[0], args[1], args[2], args[3] as string, args[4], ev);
+            case 'NOCIssued':  return this.handleNocIssued(args[0], args[1], ev);
+            case 'NOCMinted':  return this.handleNocMinted(args[0], args[1] as string, ev);
+            case 'LoanRefinanced': return this.handleLoanRefinanced(args[0], args[1], args[2], ev);
+            case 'PendingLoanAttached': return this.handlePendingLoanAttached(args[0], args[1], args[2] as string, args[3], ev);
+            case 'PendingLoanCancelled': return this.handlePendingLoanCancelled(args[0], args[1], ev);
+
+            // Gnosis Safe governance
+            case 'ExecutionSuccess': return this.handleSafeExecutionSuccess(args[0] as string, ev);
+            case 'ExecutionFailure': return this.handleSafeExecutionFailure(args[0] as string, ev);
         }
     }
 
@@ -290,41 +331,34 @@ export class IndexerService {
     private async handleRegistration(type: string, onChainId: bigint, code: string, event: EventLog) {
         try {
             const txHash = event.transactionHash;
-            logger.info({ type, code, txHash, onChainId: Number(onChainId) }, 'Indexer detected registration event');
+            logger.info({ type, code, txHash, onChainId: Number(onChainId) }, 'Indexer: Entity registration event — updating onChainId');
 
-            // Find entity by code
+            // Find entity by its unique code (set at creation time in b2b-entity.service)
             const entity = await prisma.b2BEntity.findUnique({
                 where: { code },
                 select: { id: true, walletAddress: true }
             });
 
             if (!entity) {
-                logger.warn({ code }, 'Entity registered on-chain but not found in local DB');
+                logger.warn({ code }, 'Entity registered on-chain but not found in local DB — may have been created externally');
                 return;
             }
 
-            // Update entity to set onChainId
+            // Update the entity's on-chain ID — this is the definitive link between
+            // our DB record and the on-chain entity ID.
+            // No BlockchainTransaction row is created here: the SafeProposal tracks the
+            // governance lifecycle and the SAFE_EXEC BlockchainTransaction handles crash recovery.
             await prisma.b2BEntity.update({
                 where: { id: entity.id },
-                data: {
-                    onChainId: Number(onChainId)
-                }
+                data: { onChainId: Number(onChainId) }
             });
 
-            await this.finalizeTx(txHash, TxActionType.B2B_ENTITY_REGISTER, event.blockNumber);
-
-            // Prepare notification payload
             const dynamicKey = `${type.split('_')[0].toLowerCase()}Id`;
             const notification = {
                 type: type as NotificationEvent['type'],
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
-                data: {
-                    [dynamicKey]: String(onChainId),
-                    code,
-                    authWallet: entity.walletAddress,
-                    txHash
-                }
+                data: { [dynamicKey]: String(onChainId), code, authWallet: entity.walletAddress, txHash }
             } as unknown as NotificationEvent;
 
             dispatcher.notifyEntity(entity.id, notification);
@@ -337,9 +371,9 @@ export class IndexerService {
     private async handleToggle(type: string, onChainId: bigint, active: boolean, event: EventLog) {
         try {
             const txHash = event.transactionHash;
-            logger.info({ type, onChainId: Number(onChainId), active, txHash }, 'Indexer detected toggle event');
+            logger.info({ type, onChainId: Number(onChainId), active, txHash }, 'Indexer: Entity toggle event — updating isActive');
 
-            // Find entity by onChainId
+            // Find entity by onChainId (always set after registration)
             const entity = await prisma.b2BEntity.findFirst({
                 where: { onChainId: Number(onChainId) },
                 select: { id: true }
@@ -350,25 +384,20 @@ export class IndexerService {
                 return;
             }
 
-            // Update active status locally
+            // Directly update the active status — no BlockchainTransaction row needed.
+            // The SafeProposal and its SAFE_EXEC BlockchainTransaction already track
+            // the governance lifecycle of this toggle action.
             await prisma.b2BEntity.update({
                 where: { id: entity.id },
                 data: { isActive: active }
             });
 
-            await this.finalizeTx(txHash, TxActionType.B2B_ENTITY_TOGGLE, event.blockNumber);
-
-            // Prepare notification payload
             const dynamicKey = `${type.split('_')[0].toLowerCase()}Id`;
             const notification = {
                 type: type as NotificationEvent['type'],
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
-                data: {
-                    [dynamicKey]: String(onChainId),
-                    active,
-                    txHash
-                }
+                data: { [dynamicKey]: String(onChainId), active, txHash }
             } as unknown as NotificationEvent;
 
             dispatcher.notifyEntity(entity.id, notification);
@@ -465,12 +494,37 @@ export class IndexerService {
             ]);
 
             if (vehicle && scrapEntity) {
+                // FIX #4: Set status:SCRAPPED atomically with scrapEntityId + scrapDate
+                // Clear authorizedScrapCenterId — contract does `delete authorizedScrapCenter[tokenId]`
                 await prisma.vehiclePassport.update({
                     where: { id: vehicle.id },
-                    data: { 
-                        scrapEntityId: scrapEntity.id, 
-                        scrapDate: new Date(Number(scrapDate) * 1000) 
+                    data: {
+                        status: VehicleStatus.SCRAPPED,
+                        scrapEntityId: scrapEntity.id,
+                        scrapDate: new Date(Number(scrapDate) * 1000),
+                        authorizedScrapCenterId: null
                     }
+                });
+
+                // FIX #2: Deactivate VehicleOwnership — contract burns the ownership NFT during scrap
+                await prisma.vehicleOwnership.updateMany({
+                    where: { passportId: vehicle.id },
+                    data: { isActive: false }
+                });
+            } else if (vehicle && !scrapEntity) {
+                // Scrap center not in DB yet — still record status and date
+                logger.warn({ scrapId: Number(scrapId) }, 'Scrap entity not found in DB for VehicleScrapped — scrapEntityId not set');
+                await prisma.vehiclePassport.update({
+                    where: { id: vehicle.id },
+                    data: {
+                        status: VehicleStatus.SCRAPPED,
+                        scrapDate: new Date(Number(scrapDate) * 1000),
+                        authorizedScrapCenterId: null
+                    }
+                });
+                await prisma.vehicleOwnership.updateMany({
+                    where: { passportId: vehicle.id },
+                    data: { isActive: false }
                 });
             }
 
@@ -528,6 +582,57 @@ export class IndexerService {
             }
         } catch (err) {
             logger.error({ err, txHash: event.transactionHash }, 'Failed to handle VehicleAssignedToDealer');
+        }
+    }
+
+    /**
+     * ScrapAuthorized(uint256 indexed tokenId, uint64 indexed scrapId, address indexed owner)
+     * Emitted when the vehicle owner calls authorizeScrap().
+     * Mirrors on-chain: authorizedScrapCenter[tokenId] = scrapId
+     * Cleared to null in handleVehicleScrapped (contract does `delete authorizedScrapCenter[tokenId]`).
+     */
+    private async handleScrapAuthorized(tokenId: bigint, scrapId: bigint, owner: string, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ tokenId: Number(tokenId), scrapId: Number(scrapId), owner, txHash }, 'DVP: ScrapAuthorized event');
+
+            const [vehicle, scrapEntity, ownerUser] = await Promise.all([
+                prisma.vehiclePassport.findUnique({ where: { dvpId: tokenId } }),
+                prisma.b2BEntity.findFirst({ where: { onChainId: Number(scrapId) } }),
+                prisma.user.findUnique({ where: { walletAddress: owner.toLowerCase() } })
+            ]);
+
+            if (!vehicle) {
+                return logger.warn({ tokenId: Number(tokenId) }, 'Vehicle not found for ScrapAuthorized');
+            }
+
+            // Record who the owner has authorized to scrap this vehicle
+            await prisma.vehiclePassport.update({
+                where: { id: vehicle.id },
+                data: { authorizedScrapCenterId: scrapEntity?.id || null }
+            });
+
+            // Notify the scrap center that they have been authorized
+            if (scrapEntity) {
+                const payload: NotificationEvent = {
+                    id: crypto.randomUUID(),
+                    type: 'SCRAP_AUTHORIZED',
+                    timestamp: Date.now(),
+                    data: {
+                        dvpId: String(tokenId),
+                        scrapId: String(scrapId),
+                        ownerWallet: owner,
+                        txHash
+                    }
+                };
+                dispatcher.notifyEntity(scrapEntity.id, payload);
+                // Also notify the citizen owner for audit trail
+                if (ownerUser) {
+                    dispatcher.notifyUser(ownerUser.id, payload);
+                }
+            }
+        } catch (err) {
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle ScrapAuthorized');
         }
     }
 
@@ -989,26 +1094,42 @@ export class IndexerService {
 
             if (ownership && compEntity) {
                 const tx = await prisma.blockchainTransaction.findUnique({ where: { txHash } });
+                // Fetch block timestamp once — issueDate must match what the contract set (block.timestamp)
+                const block = await event.getBlock();
+                const issueDate = new Date(Number(block.timestamp) * 1000);
                 
-                await prisma.insurancePolicy.upsert({
-                    where: { polId },
-                    create: {
-                        polId,
-                        ownershipId: ownership.id,
-                        insEntityId: compEntity.id,
-                        expiryDate: new Date(Number(expiry) * 1000),
-                        status: InsuranceStatus.ACTIVE,
-                        issueDate: new Date(),
-                        ownerUserId: ownership.ownerUserId,
-                        ownerWallet: ownership.ownerWallet,
-                        coverage: 0, // Fallback for blockchain events
-                        premium: 0, // Fallback for blockchain events
-                        createdByMemberId: tx?.initiatorMemberId || null
-                    },
-                    update: {
-                        status: InsuranceStatus.ACTIVE
-                    }
-                });
+                if (tx?.insuranceId && tx.actionType === TxActionType.INSURANCE_ISSUE) {
+                    await prisma.insurancePolicy.update({
+                        where: { id: tx.insuranceId },
+                        data: {
+                            polId,
+                            status: InsuranceStatus.ACTIVE,
+                            ownerUserId: ownership.ownerUserId,
+                            issueDate   // Accurate block timestamp
+                        }
+                    });
+                } else {
+                    // Catchup / orphan path — no pre-created DB row
+                    await prisma.insurancePolicy.upsert({
+                        where: { polId },
+                        create: {
+                            polId,
+                            ownershipId: ownership.id,
+                            insEntityId: compEntity.id,
+                            expiryDate: new Date(Number(expiry) * 1000),
+                            status: InsuranceStatus.ACTIVE,
+                            issueDate,  // Accurate block timestamp
+                            ownerUserId: ownership.ownerUserId,
+                            ownerWallet: ownership.ownerWallet,
+                            coverage: 0, // Fallback for blockchain events
+                            premium: 0, // Fallback for blockchain events
+                            createdByMemberId: tx?.initiatorMemberId || null
+                        },
+                        update: {
+                            status: InsuranceStatus.ACTIVE
+                        }
+                    });
+                }
             }
 
             await this.finalizeTx(txHash, TxActionType.INSURANCE_ISSUE, event.blockNumber);
@@ -1087,6 +1208,53 @@ export class IndexerService {
         }
     }
 
+    private async handlePolicyTerminated(polId: bigint, ownTid: bigint, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ polId: Number(polId), ownTid: Number(ownTid), txHash }, 'Insurance: PolicyTerminated event');
+
+            // Attempt to find by polId first
+            let policy = await prisma.insurancePolicy.findUnique({ where: { polId } });
+
+            // If not found by polId (e.g., race condition where PolicyIssued hasn't synced polId yet), 
+            // fallback to finding the active policy by ownTid
+            if (!policy) {
+                policy = await prisma.insurancePolicy.findFirst({
+                    where: { 
+                        ownTid,
+                        status: InsuranceStatus.ACTIVE
+                    }
+                });
+            }
+
+            if (policy) {
+                await prisma.insurancePolicy.update({
+                    where: { id: policy.id },
+                    data: { 
+                        polId, // Ensure polId is saved if we found it by ownTid
+                        status: InsuranceStatus.CANCELLED 
+                    } // Terminated mapped to CANCELLED in DB
+                });
+            }
+
+            // Note: PolicyTerminated is called via SYSTEM_ROLE during scrapVehicle. 
+            // There is no pre-created BlockchainTransaction for this specific action.
+            // So we don't call finalizeTx for it.
+
+            const payload: NotificationEvent = {
+                id: crypto.randomUUID(),
+                type: 'POLICY_TERMINATED',
+                timestamp: Date.now(),
+                data: { polId: String(polId), ownTid: String(ownTid), txHash }
+            };
+
+            if (policy?.ownerUserId) dispatcher.notifyUser(policy.ownerUserId, payload);
+            if (policy?.insEntityId) dispatcher.notifyEntity(policy.insEntityId, payload);
+        } catch (err) {
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle PolicyTerminated');
+        }
+    }
+
     // ─── PUC EVENT HANDLERS ───
 
     private async handlePucIssued(certId: bigint, ownTid: bigint, passed: boolean, expiry: bigint, event: EventLog) {
@@ -1098,27 +1266,43 @@ export class IndexerService {
             const ownership = await prisma.vehicleOwnership.findUnique({ where: { ownTid } });
 
             if (ownership && tx?.b2bEntityId) {
-                await prisma.pucCertificate.upsert({
-                    where: { certId },
-                    create: {
-                        certId,
-                        ownershipId: ownership.id,
-                        pucEntityId: tx.b2bEntityId,
-                        expiryDate: new Date(Number(expiry) * 1000),
-                        status: PucStatus.VALID,
-                        issueDate: new Date(),
-                        passed: passed,
-                        ownerUserId: ownership.ownerUserId,
-                        ownerWallet: ownership.ownerWallet,
-                        co: 0, // Fallback
-                        hc: 0, // Fallback
-                        smoke: 0, // Fallback
-                        createdByMemberId: tx.initiatorMemberId || null
-                    },
-                    update: {
-                        status: PucStatus.VALID
-                    }
-                });
+                const block = await event.getBlock();
+                const issueDate = new Date(Number(block.timestamp) * 1000);
+
+                if (tx?.pucId && tx.actionType === TxActionType.PUC_ISSUE) {
+                    await prisma.pucCertificate.update({
+                        where: { id: tx.pucId },
+                        data: {
+                            certId,
+                            status: PucStatus.VALID,
+                            ownerUserId: ownership.ownerUserId,
+                            issueDate // Accurate block timestamp
+                        }
+                    });
+                } else {
+                    // Catchup / orphan path
+                    await prisma.pucCertificate.upsert({
+                        where: { certId },
+                        create: {
+                            certId,
+                            ownershipId: ownership.id,
+                            pucEntityId: tx.b2bEntityId,
+                            expiryDate: new Date(Number(expiry) * 1000),
+                            status: PucStatus.VALID,
+                            issueDate, // Accurate block timestamp
+                            passed: passed,
+                            ownerUserId: ownership.ownerUserId,
+                            ownerWallet: ownership.ownerWallet,
+                            co: 0, // Fallback
+                            hc: 0, // Fallback
+                            smoke: 0, // Fallback
+                            createdByMemberId: tx.initiatorMemberId || null
+                        },
+                        update: {
+                            status: PucStatus.VALID
+                        }
+                    });
+                }
             }
 
             await this.finalizeTx(txHash, TxActionType.PUC_ISSUE, event.blockNumber);
@@ -1167,61 +1351,185 @@ export class IndexerService {
         }
     }
 
-    // ─── LOAN EVENT HANDLERS ───
-
-    private async handleLoanReg(loanId: bigint, ownTid: bigint, bankId: bigint, amount: bigint, event: EventLog) {
+    private async handlePucTerminated(certId: bigint, ownTid: bigint, event: EventLog) {
         try {
             const txHash = event.transactionHash;
-            logger.info({ loanId: Number(loanId), txHash }, 'Loan: Reg event');
+            logger.info({ certId: Number(certId), ownTid: Number(ownTid), txHash }, 'PUC: PUCTerminated event');
 
-            const [bankEntity, ownership] = await Promise.all([
-                prisma.b2BEntity.findFirst({ where: { onChainId: Number(bankId) } }),
-                prisma.vehicleOwnership.findUnique({ where: { ownTid } })
-            ]);
+            // Attempt to find by certId first
+            let puc = await prisma.pucCertificate.findUnique({ where: { certId } });
 
-            if (ownership && bankEntity) {
-                const tx = await prisma.blockchainTransaction.findUnique({ where: { txHash } });
-                
-                await prisma.loanRecord.upsert({
-                    where: { loanId },
-                    create: {
-                        loanId,
-                        ownershipId: ownership.id,
+            // Fallback to finding the active passed PUC by ownTid (race condition mitigation)
+            if (!puc) {
+                puc = await prisma.pucCertificate.findFirst({
+                    where: { 
                         ownTid,
-                        lenderEntityId: bankEntity.id,
-                        borrowerWallet: ownership.ownerWallet,
-                        amount: amount.toString(),
-                        status: LoanStatus.ACTIVE,
-                        disbursedAt: new Date(),
-                        borrowerUserId: ownership.ownerUserId,
-                        createdByMemberId: tx?.initiatorMemberId || null
-                    },
-                    update: {
-                        status: LoanStatus.ACTIVE
+                        passed: true,
+                        status: PucStatus.VALID
                     }
                 });
             }
 
-            await this.finalizeTx(txHash, TxActionType.LOAN_DISBURSE, event.blockNumber);
+            if (puc) {
+                await prisma.pucCertificate.update({
+                    where: { id: puc.id },
+                    data: { 
+                        certId, 
+                        status: PucStatus.EXPIRED // Terminated mapped to EXPIRED for certificates
+                    }
+                });
+            }
+
+            // No finalizedTx call needed since it's triggered by scrapVehicle SYSTEM_ROLE
 
             const payload: NotificationEvent = {
                 id: crypto.randomUUID(),
-                type: 'LOAN_REG',
+                type: 'PUC_TERMINATED',
                 timestamp: Date.now(),
-                data: { loanId: String(loanId), ownTid: String(ownTid), bankId: String(bankId), amount: String(amount), txHash }
+                data: { certId: String(certId), ownTid: String(ownTid), txHash }
             };
 
+            if (puc?.ownerUserId) dispatcher.notifyUser(puc.ownerUserId, payload);
+            if (puc?.pucEntityId) dispatcher.notifyEntity(puc.pucEntityId, payload);
+        } catch (err) {
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle PucTerminated');
+        }
+    }
+
+    // ─── LOAN EVENT HANDLERS ───
+
+    /**
+     * LoanReg(uint64 loanId, uint256 dvpId, uint64 bankId, address borrower, uint128 amount)
+     *
+     * Fired when a loan is activated on-chain. The bank.service pre-creates a PENDING
+     * LoanRecord row (with no loanId) before submitting the tx. We find that pending row
+     * and promote it to ACTIVE, injecting the on-chain loanId and borrowerUserId.
+     */
+    private async handleLoanReg(loanId: bigint, dvpId: bigint, bankId: bigint, borrower: string, amount: bigint, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ loanId: Number(loanId), dvpId: Number(dvpId), txHash }, 'Loan: LoanReg event');
+
+            const [bankEntity, passport, borrowerUser, tx] = await Promise.all([
+                prisma.b2BEntity.findFirst({ where: { onChainId: Number(bankId) } }),
+                // LoanContract indexes by dvpId — look up the passport
+                prisma.vehiclePassport.findUnique({
+                    where: { dvpId }
+                }),
+                prisma.user.findUnique({ where: { walletAddress: borrower.toLowerCase() } }),
+                prisma.blockchainTransaction.findUnique({ where: { txHash } })
+            ]);
+
+            if (passport && bankEntity) {
+                if (tx?.loanId && tx.actionType === TxActionType.LOAN_REG) {
+                    // Promote the pre-created PENDING record (bank API pre-created it before mempool)
+                    await prisma.loanRecord.update({
+                        where: { id: tx.loanId },
+                        data: {
+                            loanId,
+                            status:         LoanStatus.ACTIVE,
+                            borrowerUserId: borrowerUser?.id || null,
+                        }
+                    });
+                } else {
+                    // Catch-up / orphaned event — upsert a complete record
+                    await prisma.loanRecord.upsert({
+                        where: { loanId },
+                        create: {
+                            loanId,
+                            passportId:       passport.id,
+                            lenderEntityId:   bankEntity.id,
+                            borrowerWallet:   borrower.toLowerCase(),
+                            borrowerUserId:   borrowerUser?.id || null,
+                            amount:           amount.toString(),
+                            status:           LoanStatus.ACTIVE,
+                            disbursedAt:      new Date(),
+                            nocIssued:        false,
+                            createdByMemberId: tx?.initiatorMemberId || null
+                        },
+                        update: {
+                            loanId,
+                            status:         LoanStatus.ACTIVE,
+                            borrowerUserId: borrowerUser?.id || null,
+                        }
+                    });
+                }
+            }
+
+            // Finalize the TX with the correct actionType.
+            // For a direct registerLoan the actionType is LOAN_REG.
+            // For a refinanceLoan the secondary LoanReg fires after handleLoanRefinanced already
+            // finalized the tx with LOAN_REFINANCE — skip finalizing to avoid double-write.
+            if (!tx?.actionType || tx.actionType === TxActionType.LOAN_REG) {
+                await this.finalizeTx(txHash, TxActionType.LOAN_REG, event.blockNumber);
+            }
+
+            const payload: NotificationEvent = {
+                id:        crypto.randomUUID(),
+                type:      'LOAN_REG',
+                timestamp: Date.now(),
+                data:      { loanId: String(loanId), dvpId: String(dvpId), bankId: String(bankId), amount: String(amount), txHash }
+            };
             if (bankEntity) dispatcher.notifyEntity(bankEntity.id, payload);
-            if (ownership?.ownerUserId) dispatcher.notifyUser(ownership.ownerUserId, payload);
+            if (borrowerUser) dispatcher.notifyUser(borrowerUser.id, payload);
         } catch (err) {
             logger.error({ err, txHash: event.transactionHash }, 'Failed to handle LoanReg');
         }
     }
 
-    private async handleNocIssued(loanId: bigint, ownTid: bigint, owner: string, event: EventLog) {
+    /**
+     * NOCIssued(uint64 loanId, uint256 dvpId)
+     *
+     * Fired when the bank calls issueNOC(). Marks the loan as CLEARED.
+     * NOTE: The owner address is NOT in this event — it comes separately from NOCMinted.
+     * For unregistered vehicles, NOCMinted may not be emitted, so only NOCIssued fires.
+     */
+    private async handleNocIssued(loanId: bigint, dvpId: bigint, event: EventLog) {
         try {
             const txHash = event.transactionHash;
-            logger.info({ loanId: Number(loanId), txHash }, 'Loan: NOC Issued event');
+            logger.info({ loanId: Number(loanId), dvpId: Number(dvpId), txHash }, 'Loan: NOCIssued event');
+
+            const loan = await prisma.loanRecord.findUnique({ where: { loanId } });
+
+            if (loan) {
+                const block = await event.getBlock();
+                const nocDate = new Date(Number(block.timestamp) * 1000);
+                await prisma.loanRecord.update({
+                    where: { loanId },
+                    data: {
+                        status:    LoanStatus.CLEARED,
+                        clearedAt: nocDate,
+                        nocIssued: true,
+                        nocDate,
+                    }
+                });
+            }
+
+            await this.finalizeTx(txHash, TxActionType.LOAN_CLEAR, event.blockNumber);
+
+            const payload: NotificationEvent = {
+                id:        crypto.randomUUID(),
+                type:      'NOC_ISSUED',
+                timestamp: Date.now(),
+                data:      { loanId: String(loanId), dvpId: String(dvpId), txHash }
+            };
+            if (loan?.lenderEntityId) dispatcher.notifyEntity(loan.lenderEntityId, payload);
+        } catch (err) {
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle NocIssued');
+        }
+    }
+
+    /**
+     * NOCMinted(uint64 loanId, address owner)
+     *
+     * Fired immediately after NOCIssued when the vehicle is registered.
+     * The contract mints an ERC721 NOC NFT to the current owner.
+     * We store the recipient wallet + resolved userId on the LoanRecord.
+     */
+    private async handleNocMinted(loanId: bigint, owner: string, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ loanId: Number(loanId), owner, txHash }, 'Loan: NOCMinted event');
 
             const [loan, ownerUser] = await Promise.all([
                 prisma.loanRecord.findUnique({ where: { loanId } }),
@@ -1232,29 +1540,243 @@ export class IndexerService {
                 await prisma.loanRecord.update({
                     where: { loanId },
                     data: {
-                        status: LoanStatus.CLEARED,
-                        clearedAt: new Date(),
-                        nocIssued: true,
-                        nocDate: new Date(),
                         nocRecipientWallet: owner.toLowerCase(),
                         nocRecipientUserId: ownerUser?.id || null
                     }
                 });
             }
 
-            await this.finalizeTx(txHash, TxActionType.LOAN_CLEAR, event.blockNumber);
-
             const payload: NotificationEvent = {
-                id: crypto.randomUUID(),
-                type: 'NOC_ISSUED',
+                id:        crypto.randomUUID(),
+                type:      'NOC_ISSUED',
                 timestamp: Date.now(),
-                data: { loanId: String(loanId), ownTid: String(ownTid), ownerWallet: owner, txHash }
+                data:      { loanId: String(loanId), ownerWallet: owner, txHash }
             };
-
             if (ownerUser) dispatcher.notifyUser(ownerUser.id, payload);
             if (loan?.lenderEntityId) dispatcher.notifyEntity(loan.lenderEntityId, payload);
         } catch (err) {
-            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle NocIssued');
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle NocMinted');
+        }
+    }
+
+    /**
+     * LoanRefinanced(uint64 oldLoanId, uint64 newLoanId, uint256 dvpId)
+     *
+     * Fired when refinanceLoan() is called. The contract closes the old loan atomically
+     * and creates a new one, also firing a new LoanReg event for the new loan.
+     * We handle the "close old loan" side here; handleLoanReg handles the new loan activation.
+     */
+    private async handleLoanRefinanced(oldLoanId: bigint, newLoanId: bigint, dvpId: bigint, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ oldLoanId: Number(oldLoanId), newLoanId: Number(newLoanId), dvpId: Number(dvpId), txHash }, 'Loan: LoanRefinanced event');
+
+            const oldLoan = await prisma.loanRecord.findUnique({ where: { loanId: oldLoanId } });
+
+            if (oldLoan) {
+                // Mark old loan as CLEARED (refinanced = effectively closed)
+                await prisma.loanRecord.update({
+                    where: { loanId: oldLoanId },
+                    data: {
+                        status:    LoanStatus.CLEARED,
+                        clearedAt: new Date(),
+                        nocIssued: true,   // Mirroring Solidity: loans[oldLoanId].nocIssued = true
+                        nocDate:   new Date(),
+                    }
+                });
+            }
+
+            await this.finalizeTx(txHash, TxActionType.LOAN_REFINANCE, event.blockNumber);
+
+            const payload: NotificationEvent = {
+                id:        crypto.randomUUID(),
+                type:      'LOAN_REFINANCED',
+                timestamp: Date.now(),
+                data:      { oldLoanId: String(oldLoanId), newLoanId: String(newLoanId), dvpId: String(dvpId), txHash }
+            };
+            if (oldLoan?.lenderEntityId) dispatcher.notifyEntity(oldLoan.lenderEntityId, payload);
+        } catch (err) {
+            logger.error({ err, txHash: event.transactionHash }, 'Failed to handle LoanRefinanced');
+        }
+    }
+
+    private async handlePendingLoanAttached(dvpId: bigint, bankId: bigint, borrower: string, amount: bigint, event: EventLog) {
+        const txHash = event.transactionHash;
+        logger.info({ txHash, dvpId: dvpId.toString() }, `[INDEXER] PendingLoanAttached => Bank ${bankId}`);
+
+        try {
+            await this.finalizeTx(txHash, TxActionType.LOAN_REG, event.blockNumber);
+
+            const [loan, bankEntity] = await Promise.all([
+                prisma.loanRecord.findFirst({
+                    where: {
+                        passport: { dvpId: dvpId },
+                        lenderEntity: { onChainId: Number(bankId) },
+                        status: LoanStatus.PENDING
+                    }
+                }),
+                prisma.b2BEntity.findFirst({ where: { onChainId: Number(bankId) } })
+            ]);
+
+            const payload: NotificationEvent = {
+                id:        crypto.randomUUID(),
+                type:      'PENDING_LOAN_ATTACHED',
+                timestamp: Date.now(),
+                data:      { dvpId: String(dvpId), bankId: String(bankId), borrower, amount: amount.toString(), txHash }
+            };
+
+            const targetEntityId = loan?.lenderEntityId || bankEntity?.id;
+            if (targetEntityId) {
+                dispatcher.notifyEntity(targetEntityId, payload);
+            }
+        } catch (err) {
+            logger.error({ err, txHash }, 'Failed to handle PendingLoanAttached');
+        }
+    }
+
+    private async handlePendingLoanCancelled(dvpId: bigint, bankId: bigint, event: EventLog) {
+        const txHash = event.transactionHash;
+        logger.info({ txHash, dvpId: dvpId.toString() }, `[INDEXER] PendingLoanCancelled => Bank ${bankId}`);
+
+        try {
+            // Resolve the bank entity and delete the pending loan in parallel
+            const [_, bankEntity] = await Promise.all([
+                prisma.loanRecord.deleteMany({
+                    where: {
+                        passport: { dvpId: dvpId },
+                        lenderEntity: { onChainId: Number(bankId) },
+                        status: LoanStatus.PENDING
+                    }
+                }),
+                prisma.b2BEntity.findFirst({ where: { onChainId: Number(bankId) } })
+            ]);
+
+            await this.finalizeTx(txHash, TxActionType.LOAN_CANCEL_PENDING, event.blockNumber);
+
+            const payload: NotificationEvent = {
+                id:        crypto.randomUUID(),
+                type:      'PENDING_LOAN_CANCELLED',
+                timestamp: Date.now(),
+                data:      { dvpId: String(dvpId), bankId: String(bankId), txHash }
+            };
+
+            if (bankEntity) {
+                dispatcher.notifyEntity(bankEntity.id, payload);
+            }
+        } catch (err) {
+            logger.error({ err, txHash }, 'Failed to handle PendingLoanCancelled');
+        }
+    }
+
+    // ─── GNOSIS SAFE GOVERNANCE HANDLERS ───
+
+
+    /**
+     * Handles ExecutionSuccess(bytes32 txHash, uint256 payment) from the MoRTH Gnosis Safe.
+     *
+     * This is the crash-recovery safety net: if the BullMQ worker submitted the
+     * execTransaction to the Besu mempool but the server crashed before
+     * transactionResponse.wait() resolved, the proposal would be stuck as THRESHOLD_MET.
+     * This handler ensures the on-chain event is the definitive source of truth.
+     *
+     * It is also idempotent — if the worker already marked it EXECUTED, this is a no-op.
+     */
+    private async handleSafeExecutionSuccess(safeTxHash: string, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.info({ safeTxHash, txHash }, 'GnosisSafe: ExecutionSuccess — marking SafeProposal EXECUTED');
+
+            const proposal = await prisma.safeProposal.findUnique({
+                where: { safeTxHash }
+            });
+
+            if (!proposal) {
+                // Could be a tx from a different tool (Ledger Live, Safe UI) — not our proposal
+                logger.warn({ safeTxHash }, 'ExecutionSuccess received but no matching SafeProposal in DB — ignoring');
+                return;
+            }
+
+            // Group updates in a single transaction
+            await prisma.$transaction(async (db) => {
+                if (proposal.status !== SafeProposalStatus.EXECUTED) {
+                    await db.safeProposal.update({
+                        where: { id: proposal.id },
+                        data: { status: SafeProposalStatus.EXECUTED, executedAt: new Date() }
+                    });
+                    logger.info({ proposalId: proposal.id, safeTxHash, txHash }, 'SafeProposal marked EXECUTED by indexer (crash-recovery path)');
+                }
+
+                await db.blockchainTransaction.upsert({
+                    where: { txHash },
+                    update: { status: SyncStatus.MINED, blockNumber: event.blockNumber },
+                    create: {
+                        txHash,
+                        actionType: TxActionType.SAFE_EXEC,
+                        status:     SyncStatus.MINED,
+                        blockNumber: event.blockNumber,
+                        safeProposalId: proposal.id,
+                    }
+                });
+            });
+
+        } catch (err) {
+            logger.error({ err, safeTxHash, txHash: event.transactionHash }, 'Indexer failed to handle ExecutionSuccess');
+        }
+    }
+
+    /**
+     * Handles ExecutionFailure(bytes32 txHash, uint256 payment) from the MoRTH Gnosis Safe.
+     *
+     * The Safe emits ExecutionFailure when execTransaction() is called but the inner
+     * transaction (the one Safe is proxying) reverts on-chain. The outer tx still
+     * succeeds (gas is consumed), but the governance action itself did not execute.
+     * This marks the proposal EXECUTION_FAILED so manual fallback can be triggered.
+     */
+    private async handleSafeExecutionFailure(safeTxHash: string, event: EventLog) {
+        try {
+            const txHash = event.transactionHash;
+            logger.warn({ safeTxHash, txHash }, 'GnosisSafe: ExecutionFailure — inner tx reverted, marking SafeProposal EXECUTION_FAILED');
+
+            const proposal = await prisma.safeProposal.findUnique({
+                where: { safeTxHash }
+            });
+
+            if (!proposal) {
+                logger.warn({ safeTxHash }, 'ExecutionFailure received but no matching SafeProposal in DB — ignoring');
+                return;
+            }
+
+            if (proposal.status === SafeProposalStatus.EXECUTED) {
+                logger.error({ safeTxHash, proposalId: proposal.id }, 'Received ExecutionFailure for an already EXECUTED proposal — ignoring');
+                return;
+            }
+
+            await prisma.$transaction(async (db) => {
+                // Mark the SafeProposal as EXECUTION_FAILED
+                await db.safeProposal.update({
+                    where: { id: proposal.id },
+                    data: { status: SafeProposalStatus.EXECUTION_FAILED }
+                });
+
+                // Mark the SAFE_EXEC BlockchainTransaction as FAILED.
+                // ExecutionFailure means execTransaction() itself succeeded on-chain
+                // (gas consumed), but the inner call reverted — so the tx IS mined but FAILED.
+                await db.blockchainTransaction.upsert({
+                    where: { txHash },
+                    update: { status: SyncStatus.FAILED, blockNumber: event.blockNumber },
+                    create: {
+                        txHash,
+                        actionType:    TxActionType.SAFE_EXEC,
+                        status:        SyncStatus.FAILED,
+                        blockNumber:   event.blockNumber,
+                        safeProposalId: proposal.id,
+                    }
+                });
+            });
+
+            logger.warn({ proposalId: proposal.id, safeTxHash, txHash }, 'SafeProposal marked EXECUTION_FAILED by indexer — retry via POST /admin/proposals/:id/execute');
+        } catch (err) {
+            logger.error({ err, safeTxHash, txHash: event.transactionHash }, 'Indexer failed to handle ExecutionFailure');
         }
     }
 }

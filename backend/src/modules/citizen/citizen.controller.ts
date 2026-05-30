@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import createError from 'http-errors';
 import { asyncHandler } from '@/utils/asyncHandler';
-import { VerifyKycSchema } from './citizen.schema';
+import { VerifyKycSchema, dvpIdParamSchema, ownTidParamSchema, listVehiclesQuerySchema } from './citizen.schema';
 import { citizenService } from './citizen.service';
 import { citizenRepository } from './citizen.repository';
 
@@ -61,6 +61,123 @@ export const citizenController = {
         res.status(200).json({
             success: true,
             rtos
+        });
+    }),
+
+    /**
+     * GET /api/citizens/scrap-centers
+     * Public/Citizen endpoint — returns list of active scrap centers.
+     */
+    listScrapCenters: asyncHandler(async (req: Request, res: Response) => {
+        const { query } = listVehiclesQuerySchema.parse({ query: req.query });
+        const [scrapCenters, total] = await citizenService.listScrapCenters(query.page, query.limit);
+        res.status(200).json({
+            success: true,
+            total,
+            page: query.page,
+            limit: query.limit,
+            scrapCenters
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles
+     * Returns all vehicles owned by the authenticated citizen.
+     */
+    getMyVehicles: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!; // requireB2C guarantees caller + wallet
+
+        const { query } = listVehiclesQuerySchema.parse({ query: req.query });
+        const vehicles = await citizenService.getMyVehicles(
+            caller.sub ?? null,
+            caller.wallet!,
+            query.page,
+            query.limit
+        );
+        
+        res.status(200).json({
+            success: true,
+            vehicles
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles/:ownTid
+     * Returns full details for a single vehicle.
+     */
+    getVehicleDetail: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+
+        const { params } = ownTidParamSchema.parse({ params: req.params });
+        const vehicle = await citizenService.getVehicleDetail(
+            BigInt(params.ownTid),
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            vehicleDetails: vehicle
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles/:dvpId/scrap/eligibility
+     * Pre-flight check for scrapping a vehicle.
+     */
+    checkScrapEligibility: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+
+        const { params } = dvpIdParamSchema.parse({ params: req.params });
+        const eligibility = await citizenService.checkScrapEligibility(
+            BigInt(params.dvpId),
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            eligibility
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles/:ownTid/transfer/eligibility
+     * Pre-flight check for transferring a vehicle.
+     */
+    checkTransferEligibility: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+
+        const { params } = ownTidParamSchema.parse({ params: req.params });
+        const eligibility = await citizenService.checkTransferEligibility(
+            BigInt(params.ownTid),
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            eligibility
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles/:ownTid/transfer/status
+     * Returns the pending transfer request for a vehicle (for both seller and buyer).
+     */
+    getTransferStatus: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+
+        const { params } = ownTidParamSchema.parse({ params: req.params });
+        const transfer = await citizenService.getTransferStatus(
+            BigInt(params.ownTid),
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            transfer
         });
     })
 };

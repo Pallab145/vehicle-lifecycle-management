@@ -4,7 +4,10 @@ out = "out"
 libs = ["lib"]
 solc_version = "0.8.20"
 
-# Besu is EVM-compatible
+# Besu is EVM-compatible but requires legacy (type-0) transactions.
+# EIP-1559 type-2 transactions with minGasPrice=0 cause mempool stalls on Besu.
 evm_version = "paris"
 optimizer = true
 optimizer_runs = 200
+legacy = true
+gas_price = 0

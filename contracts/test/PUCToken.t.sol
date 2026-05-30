@@ -26,12 +26,13 @@ contract PUCTokenTest is BaseSetup {
         assertTrue(puc.isPUCValid(ownTid));
     }
     
-    function testRevert_CannotIssueFailedPUC() public {
+    function test_CanIssueFailedPUC_WhichIsRecorded() public {
         (, uint256 ownTid) = _createAndRegisterVehicle();
         
         vm.prank(pucCenter);
-        vm.expectRevert(abi.encodeWithSignature("TestFailed()"));
-        puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, false);
+        puc.issuePUC(ownTid, 0, 10, 10, 10, false);
+        
+        assertFalse(puc.isPUCValid(ownTid));
     }
     
     function testRevert_NonCenterCannotIssuePUC() public {
@@ -42,15 +43,16 @@ contract PUCTokenTest is BaseSetup {
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);
     }
     
-    function testRevert_CannotIssueMultipleActivePUCs() public {
+    function test_CanOverrideActivePUC() public {
         (, uint256 ownTid) = _createAndRegisterVehicle();
         
         vm.prank(pucCenter);
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);
         
         vm.prank(pucCenter);
-        vm.expectRevert(abi.encodeWithSignature("CertExists()"));
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);
+        
+        assertTrue(puc.isPUCValid(ownTid));
     }
     
     function test_PUCExpiresExactlyOnTime() public {
@@ -86,8 +88,10 @@ contract PUCTokenTest is BaseSetup {
         
         (, uint256 ownTid) = _createAndRegisterVehicle();
         
+        // After toggle-off, PUC_ROLE is revoked from the center.
+        // The call now fails at the access control layer — before reaching CenterNotActive.
         vm.prank(pucCenter);
-        vm.expectRevert(abi.encodeWithSignature("CenterNotActive()"));
+        vm.expectRevert(); // AccessControlUnauthorizedAccount
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);
     }
 }

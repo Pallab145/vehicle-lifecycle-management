@@ -56,15 +56,18 @@ export const b2bEntityController = {
             throw createError(400, 'Entity ID is required');
         }
 
+        const requesterId = req.caller?.sub;
+        if (!requesterId) throw createError(401, 'Unauthorized: No caller context found');
+
         // 1. Validate payload
         const parsedData = ToggleB2BEntitySchema.parse(req.body);
 
-        // 2. Delegate to Service Layer
-        const result = await b2bEntityService.toggleEntityStatus(id, parsedData);
+        // 2. Delegate to Service Layer (creates a SafeProposal)
+        const result = await b2bEntityService.toggleEntityStatus(id, parsedData, requesterId);
 
-        res.status(200).json({
+        res.status(202).json({
             success: true,
-            message: `Entity successfully ${parsedData.isActive ? 'activated' : 'suspended'}`,
+            message: 'Toggle governance proposal created. Entity status will change once required owner(s) sign and the Safe executes.',
             toggleDetails: result
         });
     }),
@@ -97,9 +100,12 @@ export const b2bEntityController = {
             throw createError(400, 'Entity ID is required');
         }
 
-        const result = await b2bEntityService.retryEntityRegistration(id);
+        const requesterId = req.caller?.sub;
+        if (!requesterId) throw createError(401, 'Unauthorized: No caller context found');
 
-        res.status(200).json({
+        const result = await b2bEntityService.retryEntityRegistration(id, requesterId);
+
+        res.status(202).json({
             success: true,
             retryDetails: result
         });

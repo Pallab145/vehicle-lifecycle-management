@@ -20,6 +20,10 @@ export async function initializeWorkers() {
         const { scheduleReconciliationJob } = await import('@/jobs/reconciliation.queue');
         await scheduleReconciliationJob();
 
+        // Start Safe Execution Worker
+        const { startSafeExecutionWorker } = await import('@/jobs/safe-execution.worker');
+        startSafeExecutionWorker();
+
         logger.info({ event: 'workers_init_complete' }, '✅ In-memory background workers ready');
     } catch (err) {
         logger.error({ event: 'workers_init_failed', err }, 'Failed to initialize background workers');

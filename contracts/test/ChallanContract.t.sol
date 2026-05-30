@@ -107,8 +107,10 @@ contract ChallanContractTest is BaseSetup {
         
         (, uint256 ownTid) = _createAndRegisterVehicle();
         
+        // After toggle-off, POLICE_ROLE is revoked from the officer.
+        // The call now fails at the access control layer — before reaching PoliceNotActive.
         vm.prank(police);
-        vm.expectRevert(abi.encodeWithSignature("PoliceNotActive()"));
+        vm.expectRevert(); // AccessControlUnauthorizedAccount
         challan.issueChallan(ownTid, 100);
     }
 }

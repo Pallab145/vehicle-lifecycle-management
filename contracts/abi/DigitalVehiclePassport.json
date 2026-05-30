@@ -145,6 +145,43 @@
   },
   {
     "type": "function",
+    "name": "authorizeScrap",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "scrapCenterCode",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "authorizedScrapCenter",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "balanceOf",
     "inputs": [
       {
@@ -164,6 +201,19 @@
   },
   {
     "type": "function",
+    "name": "challanContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IChallanContract"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "exists",
     "inputs": [
       {
@@ -177,6 +227,30 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "existsAndGetStatus",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
@@ -341,6 +415,35 @@
             "internalType": "bytes32"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getRegistrationContext",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exists_",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "dealer",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -530,6 +633,19 @@
   },
   {
     "type": "function",
+    "name": "insContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IInsuranceToken"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "isApprovedForAll",
     "inputs": [
       {
@@ -586,6 +702,19 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "loanContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ILoanContract"
       }
     ],
     "stateMutability": "view"
@@ -736,7 +865,7 @@
       {
         "name": "",
         "type": "address",
-        "internalType": "address"
+        "internalType": "contract IOwnershipToken"
       }
     ],
     "stateMutability": "view"
@@ -801,6 +930,19 @@
         "name": "specsHash",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pucContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPUCToken"
       }
     ],
     "stateMutability": "view"
@@ -1033,6 +1175,34 @@
   },
   {
     "type": "function",
+    "name": "setComplianceContracts",
+    "inputs": [
+      {
+        "name": "_loan",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_challan",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_ins",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_puc",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setOwnershipContract",
     "inputs": [
       {
@@ -1234,6 +1404,37 @@
   },
   {
     "type": "event",
+    "name": "ComplianceContractsLinked",
+    "inputs": [
+      {
+        "name": "loan",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "challan",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "ins",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "puc",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "MfgReg",
     "inputs": [
       {
@@ -1272,6 +1473,19 @@
         "type": "bool",
         "indexed": false,
         "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipContractLinked",
+    "inputs": [
+      {
+        "name": "ownershipContract",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -1344,6 +1558,31 @@
       },
       {
         "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ScrapAuthorized",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "scrapId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "owner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -1549,6 +1788,11 @@
   },
   {
     "type": "error",
+    "name": "ActiveLoanExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "AlreadyScrapped",
     "inputs": []
   },
@@ -1677,12 +1921,22 @@
   },
   {
     "type": "error",
+    "name": "NotAManufacturer",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotActive",
     "inputs": []
   },
   {
     "type": "error",
     "name": "NotEligible",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotVehicleOwner",
     "inputs": []
   },
   {
@@ -1697,7 +1951,32 @@
   },
   {
     "type": "error",
+    "name": "OwnershipContractAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnershipContractNotSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PendingChallansExist",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ScrapNotAuthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "Soulbound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TransferPending",
     "inputs": []
   },
   {
@@ -1708,6 +1987,16 @@
   {
     "type": "error",
     "name": "VehicleNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VehicleNotRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroHashNotAllowed",
     "inputs": []
   }
 ]

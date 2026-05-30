@@ -16,7 +16,6 @@ export interface CallerIdentity {
     type: AuthType;          // Identifies the auth mechanism
     jti: string;             // JWT ID for refresh token tracking
     
-    // B2C Specific
     wallet?: string;
     
     // B2B Specific

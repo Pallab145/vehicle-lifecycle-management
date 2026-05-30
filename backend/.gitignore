@@ -24,3 +24,6 @@ yarn-error.log*
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Seed Credentials
+seed-credentials.md

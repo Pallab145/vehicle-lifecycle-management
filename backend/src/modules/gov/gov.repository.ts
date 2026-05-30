@@ -1,5 +1,5 @@
 import prisma from '@/lib/prisma';
-import { SyncStatus, TxActionType, TxSource, Prisma, ChallanStatus } from '@/generated/prisma/client';
+import { Prisma, ChallanStatus } from '@/generated/prisma/client';
 
 export const govRepository = {
     /**
@@ -11,27 +11,6 @@ export const govRepository = {
         });
     },
 
-    /**
-     * Tracks an administrative cancellation transaction.
-     */
-    async createAdminCancelChallanTx(data: {
-        challanId: string;
-        govEntityId: string;
-        memberId: string;
-        txHash: string;
-    }) {
-        return prisma.blockchainTransaction.create({
-            data: {
-                txHash: data.txHash,
-                actionType: TxActionType.CHALLAN_CANCEL, // Handled correctly by reconciler & indexer
-                challanId: data.challanId,
-                b2bEntityId: data.govEntityId,
-                initiatorMemberId: data.memberId,
-                txSource: TxSource.MEMBER,
-                status: SyncStatus.PENDING
-            }
-        });
-    },
 
     /**
      * Lists ALL challans globally across the system, with advanced filtering for the Government.

@@ -28,3 +28,5 @@ lerna-debug.log*
 
 # Besu Blockchain Nodes
 besu/
+
+accounts.json

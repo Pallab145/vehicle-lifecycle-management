@@ -86,7 +86,8 @@ enum PucStatus {
 
 /// State of a vehicle loan.
 enum LoanStatus {
-  ACTIVE // Loan is outstanding
+  PENDING   // Transaction submitted to mempool; awaiting LoanReg event from Indexer
+  ACTIVE    // Loan is outstanding (confirmed on-chain)
   CLEARED // Fully repaid
   DEFAULTED // Defaulted
 }
@@ -129,15 +130,32 @@ enum TxActionType {
   PUC_ISSUE
   /// Maps to PUCExpired(certId) event — transitions certificate status to EXPIRED.
   PUC_EXPIRE
-  LOAN_DISBURSE
+  LOAN_REG
   LOAN_CLEAR
+  /// Maps to LoanRefinanced(oldLoanId, newLoanId, dvpId) event — closes old loan, activates new one.
+  LOAN_REFINANCE
+  /// Maps to cancelPendingLoan(dvpId) call — no on-chain event emitted; just clears the pending DB record.
+  LOAN_CANCEL_PENDING
+  /// Maps to ExecutionSuccess(txHash, payment) event on the Gnosis Safe contract.
+  /// Tracks the on-chain relayer execTransaction() call for a SafeProposal.
+  SAFE_EXEC
 }
 
 /// Discriminator for who/what triggered a blockchain transaction submission.
 enum TxSource {
-  MEMBER  // Triggered by a logged-in B2B staff member via the API
+  MEMBER // Triggered by a logged-in B2B staff member via the API
   WEBHOOK // Triggered automatically by a payment webhook (no human member)
-  SYSTEM  // Triggered by a background job or reconciliation worker
+  SYSTEM // Triggered by a background job or reconciliation worker
+}
+
+/// Lifecycle status of a Gnosis Safe multi-sig governance proposal.
+/// Proposals are created by the backend when an admin action needs multi-sig approval (e.g. addBank).
+enum SafeProposalStatus {
+  PENDING // Collecting EIP-712 signatures from Safe owners
+  THRESHOLD_MET // Required number of signatures collected — ready to execute
+  EXECUTED // execTransaction successfully submitted and mined on-chain
+  EXECUTION_FAILED // Background execution failed (e.g., RPC error or revert)
+  CANCELLED // Cancelled by a GOVERNMENT admin before execution threshold
 }
 
 // ============================================================
@@ -163,34 +181,34 @@ model User {
 
   // B2C Blockchain Cross-Relations (Citizen Dashboard)
   /// Vehicles this citizen currently owns (from VehicleReg / XferDone events)
-  ownedVehicles      VehicleOwnership[] @relation("CurrentOwner")
+  ownedVehicles         VehicleOwnership[]      @relation("CurrentOwner")
   /// Transfers initiated as seller (XferInit: msg.sender)
-  soldTransfers      TransferRequest[]  @relation("TransferSeller")
+  soldTransfers         TransferRequest[]       @relation("TransferSeller")
   /// Transfers accepted as buyer (XferInit: buyer param)
-  boughtTransfers    TransferRequest[]  @relation("TransferBuyer")
+  boughtTransfers       TransferRequest[]       @relation("TransferBuyer")
   /// Challans issued against vehicles this citizen owned at the time
-  challansReceived   Challan[]          @relation("ViolatorUser")
+  challansReceived      Challan[]               @relation("ViolatorUser")
   /// Insurance policies this citizen holds (PolicyIssued: owner param)
-  heldPolicies       InsurancePolicy[]  @relation("PolicyHolder")
+  heldPolicies          InsurancePolicy[]       @relation("PolicyHolder")
   /// Loans this citizen borrowed (LoanReg: borrower = current ownTid owner)
-  borrowedLoans      LoanRecord[]       @relation("LoanBorrower")
+  borrowedLoans         LoanRecord[]            @relation("LoanBorrower")
   /// NOC certificates minted to this citizen (NOCIssued: owner param)
-  nocReceived        LoanRecord[]       @relation("NocRecipient")
+  nocReceived           LoanRecord[]            @relation("NocRecipient")
   /// Vehicles assigned to this citizen-dealer before first RTO registration (VehicleAssignedToDealer)
-  heldVehicles       VehiclePassport[]  @relation("DealerUser")
+  heldVehicles          VehiclePassport[]       @relation("DealerUser")
   /// TradeCerts issued by RTO to this citizen-dealer (TradeCertIssued: dealer param)
-  receivedTradeCerts TradeCert[]        @relation("DealerUser")
+  receivedTradeCerts    TradeCert[]             @relation("DealerUser")
   /// Off-chain registration requests where this citizen is the buyer
-  boughtRegistrations RegistrationRequest[] @relation("RegBuyer")
+  boughtRegistrations   RegistrationRequest[]   @relation("RegBuyer")
   /// Off-chain registration requests submitted by this citizen-dealer
-  dealerRegistrations RegistrationRequest[] @relation("RegDealer")
+  dealerRegistrations   RegistrationRequest[]   @relation("RegDealer")
   /// PUC certificates issued to vehicles owned by this citizen
-  pucCertificates    PucCertificate[]   @relation("PucOwner")
+  pucCertificates       PucCertificate[]        @relation("PucOwner")
   /// Blockchain transactions initiated directly by this citizen via MetaMask.
   initiatedTransactions BlockchainTransaction[] @relation("InitiatedTransactions")
 
   /// The RTO this citizen is registered under (chosen during KYC)
-  rto            B2BEntity? @relation("CitizenRto", fields: [rtoEntityId], references: [id])
+  rto B2BEntity? @relation("CitizenRto", fields: [rtoEntityId], references: [id])
 
   @@index([walletAddress])
   @@index([email])
@@ -215,9 +233,9 @@ model B2BEntity {
   /// The numeric ID assigned by the smart contract (e.g., rtoId, policeId, mfgId).
   onChainId     BigInt?
 
-  isActive      Boolean    @default(true)
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   /// The Government Admin B2B member who registered this entity on-chain.
   /// Populated by Indexer from MfgReg, RTOReg, PoliceReg, InsReg, CenterReg, BankReg events.
@@ -229,19 +247,23 @@ model B2BEntity {
   registeredByMember B2BMember?        @relation("RegisteredEntities", fields: [registeredByMemberId], references: [id])
 
   // Blockchain-indexed data linked to this entity
-  manufacturedVehicles VehiclePassport[]  @relation("ManufacturerEntity")
-  scrappedVehicles     VehiclePassport[]  @relation("ScrapEntity")
-  registeredVehicles   VehicleOwnership[] @relation("RtoEntity")
-  approvedTransfers    TransferRequest[]  @relation("RtoApproverEntity")
-  registrationRequests RegistrationRequest[] @relation("RtoEntity")
-  issuedTradeCerts     TradeCert[]        @relation("RtoIssuedTradeCert")
-  issuedChallans       Challan[]          @relation("PoliceEntity")
-  issuedPolicies       InsurancePolicy[]  @relation("InsuranceEntity")
-  issuedPucCerts       PucCertificate[]   @relation("PucEntity")
-  grantedLoans         LoanRecord[]       @relation("LenderEntity")
+  manufacturedVehicles  VehiclePassport[]       @relation("ManufacturerEntity")
+  scrappedVehicles      VehiclePassport[]       @relation("ScrapEntity")
+  /// Vehicles that the vehicle owner has pre-authorized this center to scrap (ScrapAuthorized event)
+  authorizedForScrapping VehiclePassport[]      @relation("AuthorizedScrapEntity")
+  registeredVehicles   VehicleOwnership[]      @relation("RtoEntity")
+  approvedTransfers    TransferRequest[]       @relation("RtoApproverEntity")
+  registrationRequests RegistrationRequest[]   @relation("RtoEntity")
+  issuedTradeCerts     TradeCert[]             @relation("RtoIssuedTradeCert")
+  issuedChallans       Challan[]               @relation("PoliceEntity")
+  issuedPolicies       InsurancePolicy[]       @relation("InsuranceEntity")
+  issuedPucCerts       PucCertificate[]        @relation("PucEntity")
+  grantedLoans         LoanRecord[]            @relation("LenderEntity")
   transactions         BlockchainTransaction[]
   /// Citizens who selected this RTO during KYC
-  registeredCitizens   User[]             @relation("CitizenRto")
+  registeredCitizens   User[]                  @relation("CitizenRto")
+  /// Safe governance proposals that target this entity (e.g. registering this bank on-chain).
+  targetedProposals    SafeProposal[]          @relation("ProposalTargetEntity")
 
   @@index([type])
   @@index([walletAddress])
@@ -252,17 +274,20 @@ model B2BEntity {
 /// A human staff member who belongs to a B2B entity.
 /// Authenticates via email + password. Can request password reset via OTP.
 model B2BMember {
-  id           String     @id @default(cuid())
-  entityId     String
-  email        String     @unique
-  name         String
+  id            String     @id @default(cuid())
+  entityId      String
+  email         String     @unique
+  name          String
   /// Argon2/bcrypt hashed password. Never stored in plaintext.
-  passwordHash String
-  role         MemberRole @default(OPERATOR)
-  isActive     Boolean    @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  passwordHash  String
+  role          MemberRole @default(OPERATOR)
+  isActive      Boolean    @default(true)
+  lastLoginAt   DateTime?
+  /// Ethereum wallet address for this member (REQUIRED for GOVERNMENT members who are Gnosis Safe owners).
+  /// Used to verify the connected Ledger/MetaMask matches the authenticated session when signing proposals.
+  walletAddress String?    @unique
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   // Relations
   entity        B2BEntity          @relation(fields: [entityId], references: [id], onDelete: Cascade)
@@ -271,24 +296,29 @@ model B2BMember {
   createdKeys   EntitySigningKey[] @relation("KeyCreatedBy")
 
   // Blockchain Audit Relations (actions performed by this B2B staff member)
-  createdPassports   VehiclePassport[]
-  rtoRegistrations   VehicleOwnership[]
+  createdPassports      VehiclePassport[]
+  rtoRegistrations      VehicleOwnership[]
   /// RTO clerk who gave final approveTransfer() approval (not the seller/buyer, who are Citizens)
-  approvedTransfers  TransferRequest[]  @relation("RtoApprovedMember")
-  issuedTradeCerts   TradeCert[]
-  issuedChallans     Challan[]          @relation("IssuedChallans")
-  cancelledChallans  Challan[]          @relation("CancelledChallans")
-  issuedPolicies     InsurancePolicy[]
-  issuedPucCerts     PucCertificate[]
-  grantedLoans       LoanRecord[]
+  approvedTransfers     TransferRequest[]       @relation("RtoApprovedMember")
+  issuedTradeCerts      TradeCert[]
+  issuedChallans        Challan[]               @relation("IssuedChallans")
+  cancelledChallans     Challan[]               @relation("CancelledChallans")
+  issuedPolicies        InsurancePolicy[]
+  issuedPucCerts        PucCertificate[]
+  grantedLoans          LoanRecord[]
   /// Entities this member registered on-chain (Gov admin audit: MfgReg, RTOReg, etc.)
-  registeredEntities B2BEntity[]        @relation("RegisteredEntities")
+  registeredEntities    B2BEntity[]             @relation("RegisteredEntities")
   /// Blockchain transactions submitted via the backend API by this staff member.
   initiatedTransactions BlockchainTransaction[] @relation("InitiatedTransactions")
+  /// Safe governance proposals created by this GOVERNMENT member.
+  proposedProposals     SafeProposal[]          @relation("ProposedByMember")
+  /// EIP-712 signatures this member submitted for Safe governance proposals.
+  collectedSignatures   SafeSignature[]
 
   @@index([entityId])
   @@index([email])
   @@index([entityId, role])
+  @@index([walletAddress])
   @@map("b2b_members")
 }
 
@@ -314,7 +344,7 @@ model EntitySigningKey {
   createdById         String?
 
   // Relations
-  entity    B2BEntity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  entity    B2BEntity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
   createdBy B2BMember? @relation("KeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([entityId])
@@ -373,7 +403,7 @@ model RefreshToken {
 // ============================================================
 
 /// Soulbound permanent vehicle identity from the DigitalVehiclePassport (DVP) contract.
-/// Indexed from: VehicleMfg, StatusChange, VehicleScrapped, VehicleAssignedToDealer events.
+/// Indexed from: VehicleMfg, StatusChange, VehicleScrapped, VehicleAssignedToDealer, ScrapAuthorized events.
 model VehiclePassport {
   id            String        @id @default(cuid())
   /// On-chain ERC721 token ID from DVP contract. Populated by Indexer.
@@ -394,7 +424,11 @@ model VehiclePassport {
   /// B2B entity of type SCRAP_CENTER.
   scrapEntityId String?
   scrapDate     DateTime?
-  
+  /// The scrap center that the vehicle OWNER has pre-authorized to scrap this vehicle.
+  /// Populated by ScrapAuthorized event, cleared to null when VehicleScrapped fires.
+  /// Mirrors on-chain: authorizedScrapCenter[tokenId] mapping in DigitalVehiclePassport.
+  authorizedScrapCenterId String?
+
   /// Pending off-chain registration request
   registrationRequest RegistrationRequest?
 
@@ -402,17 +436,20 @@ model VehiclePassport {
   createdByMemberId String?
 
   // Relations
-  manufacturer    B2BEntity         @relation("ManufacturerEntity", fields: [mfgEntityId], references: [id])
-  scrapCenter     B2BEntity?        @relation("ScrapEntity", fields: [scrapEntityId], references: [id])
-  dealerUser      User?             @relation("DealerUser", fields: [dealerUserId], references: [id])
-  createdByMember B2BMember?        @relation(fields: [createdByMemberId], references: [id])
-  ownership       VehicleOwnership?
-  transactions    BlockchainTransaction[]
+  manufacturer          B2BEntity               @relation("ManufacturerEntity", fields: [mfgEntityId], references: [id])
+  scrapCenter           B2BEntity?              @relation("ScrapEntity", fields: [scrapEntityId], references: [id])
+  authorizedScrapCenter B2BEntity?              @relation("AuthorizedScrapEntity", fields: [authorizedScrapCenterId], references: [id])
+  dealerUser            User?                   @relation("DealerUser", fields: [dealerUserId], references: [id])
+  createdByMember       B2BMember?              @relation(fields: [createdByMemberId], references: [id])
+  ownership             VehicleOwnership?
+  loanRecords           LoanRecord[]
+  transactions          BlockchainTransaction[]
 
   @@index([dvpId])
   @@index([vinHash])
   @@index([mfgEntityId])
   @@index([dealerUserId])
+  @@index([authorizedScrapCenterId])
   @@index([status])
   @@map("vehicle_passports")
 }
@@ -441,15 +478,14 @@ model VehicleOwnership {
   rtoMemberId String?
 
   // Relations
-  passport          VehiclePassport   @relation(fields: [passportId], references: [id], onDelete: Cascade)
-  rtoEntity         B2BEntity         @relation("RtoEntity", fields: [rtoEntityId], references: [id])
-  ownerUser         User?             @relation("CurrentOwner", fields: [ownerUserId], references: [id])
-  rtoMember         B2BMember?        @relation(fields: [rtoMemberId], references: [id])
+  passport          VehiclePassport         @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  rtoEntity         B2BEntity               @relation("RtoEntity", fields: [rtoEntityId], references: [id])
+  ownerUser         User?                   @relation("CurrentOwner", fields: [ownerUserId], references: [id])
+  rtoMember         B2BMember?              @relation(fields: [rtoMemberId], references: [id])
   transferRequests  TransferRequest[]
   challans          Challan[]
   insurancePolicies InsurancePolicy[]
   pucCertificates   PucCertificate[]
-  loanRecords       LoanRecord[]
   transactions      BlockchainTransaction[]
 
   @@index([ownTid])
@@ -493,11 +529,11 @@ model TransferRequest {
   rtoApproverMemberId String?
 
   // Relations
-  ownership         VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  rtoApprover       B2BEntity?       @relation("RtoApproverEntity", fields: [rtoEntityId], references: [id])
-  sellerUser        User?            @relation("TransferSeller", fields: [sellerUserId], references: [id])
-  buyerUser         User?            @relation("TransferBuyer", fields: [buyerUserId], references: [id])
-  rtoApproverMember B2BMember?       @relation("RtoApprovedMember", fields: [rtoApproverMemberId], references: [id])
+  ownership         VehicleOwnership        @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  rtoApprover       B2BEntity?              @relation("RtoApproverEntity", fields: [rtoEntityId], references: [id])
+  sellerUser        User?                   @relation("TransferSeller", fields: [sellerUserId], references: [id])
+  buyerUser         User?                   @relation("TransferBuyer", fields: [buyerUserId], references: [id])
+  rtoApproverMember B2BMember?              @relation("RtoApprovedMember", fields: [rtoApproverMemberId], references: [id])
   transactions      BlockchainTransaction[]
 
   @@index([ownTid])
@@ -511,22 +547,22 @@ model TransferRequest {
 
 /// Off-chain registration requests submitted by Dealers to RTOs
 model RegistrationRequest {
-  id            String             @id @default(cuid())
-  dvpId         BigInt
-  passportId    String             @unique
-  buyerWallet   String
-  dealerWallet  String
-  buyerUserId   String?
-  dealerUserId  String?
-  rtoEntityId   String
-  status        RegistrationStatus @default(PENDING)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id           String             @id @default(cuid())
+  dvpId        BigInt
+  passportId   String             @unique
+  buyerWallet  String
+  dealerWallet String
+  buyerUserId  String?
+  dealerUserId String?
+  rtoEntityId  String
+  status       RegistrationStatus @default(PENDING)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
-  passport      VehiclePassport    @relation(fields: [passportId], references: [id], onDelete: Cascade)
-  rto           B2BEntity          @relation("RtoEntity", fields: [rtoEntityId], references: [id], onDelete: Cascade)
-  buyerUser     User?              @relation("RegBuyer", fields: [buyerUserId], references: [id])
-  dealerUser    User?              @relation("RegDealer", fields: [dealerUserId], references: [id])
+  passport   VehiclePassport @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  rto        B2BEntity       @relation("RtoEntity", fields: [rtoEntityId], references: [id], onDelete: Cascade)
+  buyerUser  User?           @relation("RegBuyer", fields: [buyerUserId], references: [id])
+  dealerUser User?           @relation("RegDealer", fields: [dealerUserId], references: [id])
 
   @@index([dealerWallet])
   @@index([rtoEntityId])
@@ -552,9 +588,9 @@ model TradeCert {
   createdByMemberId String?
 
   // Relations
-  rtoEntity       B2BEntity  @relation("RtoIssuedTradeCert", fields: [rtoEntityId], references: [id])
-  dealerUser      User?      @relation("DealerUser", fields: [dealerUserId], references: [id])
-  createdByMember B2BMember? @relation(fields: [createdByMemberId], references: [id])
+  rtoEntity       B2BEntity               @relation("RtoIssuedTradeCert", fields: [rtoEntityId], references: [id])
+  dealerUser      User?                   @relation("DealerUser", fields: [dealerUserId], references: [id])
+  createdByMember B2BMember?              @relation(fields: [createdByMemberId], references: [id])
   transactions    BlockchainTransaction[]
 
   @@index([dealerWallet])
@@ -594,16 +630,16 @@ model Challan {
 
   /// Unique payment gateway order ID (e.g. Razorpay order_id) created when citizen initiates payment.
   /// Used by webhook to locate the correct Challan record.
-  paymentOrderId      String?  @unique
+  paymentOrderId String? @unique
   /// Optional payment reference/transaction ID returned by the gateway after successful payment.
-  paymentRef          String?
+  paymentRef     String?
 
   // Relations
-  ownership         VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  policeEntity      B2BEntity        @relation("PoliceEntity", fields: [policeEntityId], references: [id])
-  createdByMember   B2BMember?       @relation("IssuedChallans", fields: [createdByMemberId], references: [id])
-  cancelledByMember B2BMember?       @relation("CancelledChallans", fields: [cancelledByMemberId], references: [id])
-  violatorUser      User?            @relation("ViolatorUser", fields: [violatorUserId], references: [id])
+  ownership         VehicleOwnership        @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  policeEntity      B2BEntity               @relation("PoliceEntity", fields: [policeEntityId], references: [id])
+  createdByMember   B2BMember?              @relation("IssuedChallans", fields: [createdByMemberId], references: [id])
+  cancelledByMember B2BMember?              @relation("CancelledChallans", fields: [cancelledByMemberId], references: [id])
+  violatorUser      User?                   @relation("ViolatorUser", fields: [violatorUserId], references: [id])
   transactions      BlockchainTransaction[]
 
   @@index([ownTid])
@@ -640,10 +676,10 @@ model InsurancePolicy {
   ownerUserId       String?
 
   // Relations
-  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  insEntity       B2BEntity        @relation("InsuranceEntity", fields: [insEntityId], references: [id])
-  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
-  policyHolder    User?            @relation("PolicyHolder", fields: [ownerUserId], references: [id])
+  ownership       VehicleOwnership        @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  insEntity       B2BEntity               @relation("InsuranceEntity", fields: [insEntityId], references: [id])
+  createdByMember B2BMember?              @relation(fields: [createdByMemberId], references: [id])
+  policyHolder    User?                   @relation("PolicyHolder", fields: [ownerUserId], references: [id])
   transactions    BlockchainTransaction[]
 
   @@index([ownTid])
@@ -681,10 +717,10 @@ model PucCertificate {
   ownerUserId       String?
 
   // Relations
-  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  pucEntity       B2BEntity        @relation("PucEntity", fields: [pucEntityId], references: [id])
-  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
-  ownerUser       User?            @relation("PucOwner", fields: [ownerUserId], references: [id])
+  ownership       VehicleOwnership        @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  pucEntity       B2BEntity               @relation("PucEntity", fields: [pucEntityId], references: [id])
+  createdByMember B2BMember?              @relation(fields: [createdByMemberId], references: [id])
+  ownerUser       User?                   @relation("PucOwner", fields: [ownerUserId], references: [id])
   transactions    BlockchainTransaction[]
 
   @@index([ownTid])
@@ -701,8 +737,7 @@ model LoanRecord {
   /// On-chain loanId counter from LoanContract.
   loanId             BigInt?    @unique
   /// Web2 Foreign Key
-  ownershipId        String
-  ownTid             BigInt?
+  passportId         String
   /// Lender entity (financial institution) — B2B entity.
   lenderEntityId     String
   /// Borrower wallet — vehicle owner at time of LoanReg (from on-chain state).
@@ -728,14 +763,14 @@ model LoanRecord {
   nocRecipientUserId String?
 
   // Relations
-  ownership       VehicleOwnership @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  lenderEntity    B2BEntity        @relation("LenderEntity", fields: [lenderEntityId], references: [id])
-  createdByMember B2BMember?       @relation(fields: [createdByMemberId], references: [id])
-  loanBorrower    User?            @relation("LoanBorrower", fields: [borrowerUserId], references: [id])
-  nocRecipient    User?            @relation("NocRecipient", fields: [nocRecipientUserId], references: [id])
+  passport        VehiclePassport         @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  lenderEntity    B2BEntity               @relation("LenderEntity", fields: [lenderEntityId], references: [id])
+  createdByMember B2BMember?              @relation(fields: [createdByMemberId], references: [id])
+  loanBorrower    User?                   @relation("LoanBorrower", fields: [borrowerUserId], references: [id])
+  nocRecipient    User?                   @relation("NocRecipient", fields: [nocRecipientUserId], references: [id])
   transactions    BlockchainTransaction[]
 
-  @@index([ownTid])
+  @@index([passportId])
   @@index([borrowerWallet])
   @@index([borrowerUserId])
   @@index([status])
@@ -759,15 +794,15 @@ model BlockchainTransaction {
   updatedAt      DateTime     @updatedAt
 
   // Strict Referential Integrity Foreign Keys — asset being acted upon
-  b2bEntityId    String?
-  passportId     String?
-  ownershipId    String?
-  transferReqId  String?
-  tradeCertId    String?
-  challanId      String?
-  insuranceId    String?
-  pucId          String?
-  loanId         String?
+  b2bEntityId   String?
+  passportId    String?
+  ownershipId   String?
+  transferReqId String?
+  tradeCertId   String?
+  challanId     String?
+  insuranceId   String?
+  pucId         String?
+  loanId        String?
 
   /// B2B staff member who submitted this tx via the backend API.
   /// Used by the Indexer/Worker to notify the initiator on MINED/FAILED.
@@ -775,32 +810,122 @@ model BlockchainTransaction {
   initiatorMemberId String?
 
   /// Discriminates how this transaction was triggered for audit purposes.
-  txSource          TxSource @default(MEMBER)
+  txSource TxSource @default(MEMBER)
 
   /// B2C citizen who submitted this tx directly via MetaMask.
   /// Resolved by the Indexer from the on-chain wallet address.
-  initiatorUserId   String?
+  initiatorUserId String?
+  /// If this transaction was the execution of a Safe multi-sig proposal, links back to that proposal.
+  /// Set by the backend relayer at the moment it calls execTransaction on the Safe.
+  safeProposalId  String? @unique
 
   // Relations — assets
-  b2bEntity      B2BEntity?        @relation(fields: [b2bEntityId], references: [id], onDelete: Cascade)
-  passport       VehiclePassport?  @relation(fields: [passportId], references: [id], onDelete: Cascade)
-  ownership      VehicleOwnership? @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
-  transferReq    TransferRequest?  @relation(fields: [transferReqId], references: [id], onDelete: Cascade)
-  tradeCert      TradeCert?        @relation(fields: [tradeCertId], references: [id], onDelete: Cascade)
-  challan        Challan?          @relation(fields: [challanId], references: [id], onDelete: Cascade)
-  insurance      InsurancePolicy?  @relation(fields: [insuranceId], references: [id], onDelete: Cascade)
-  puc            PucCertificate?   @relation(fields: [pucId], references: [id], onDelete: Cascade)
-  loan           LoanRecord?       @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  b2bEntity   B2BEntity?        @relation(fields: [b2bEntityId], references: [id], onDelete: Cascade)
+  passport    VehiclePassport?  @relation(fields: [passportId], references: [id], onDelete: Cascade)
+  ownership   VehicleOwnership? @relation(fields: [ownershipId], references: [id], onDelete: Cascade)
+  transferReq TransferRequest?  @relation(fields: [transferReqId], references: [id], onDelete: Cascade)
+  tradeCert   TradeCert?        @relation(fields: [tradeCertId], references: [id], onDelete: Cascade)
+  challan     Challan?          @relation(fields: [challanId], references: [id], onDelete: Cascade)
+  insurance   InsurancePolicy?  @relation(fields: [insuranceId], references: [id], onDelete: Cascade)
+  puc         PucCertificate?   @relation(fields: [pucId], references: [id], onDelete: Cascade)
+  loan        LoanRecord?       @relation(fields: [loanId], references: [id], onDelete: Cascade)
 
   // Relations — initiators
-  initiatorMember B2BMember? @relation("InitiatedTransactions", fields: [initiatorMemberId], references: [id], onDelete: SetNull)
-  initiatorUser   User?      @relation("InitiatedTransactions", fields: [initiatorUserId], references: [id], onDelete: SetNull)
+  initiatorMember B2BMember?    @relation("InitiatedTransactions", fields: [initiatorMemberId], references: [id], onDelete: SetNull)
+  initiatorUser   User?         @relation("InitiatedTransactions", fields: [initiatorUserId], references: [id], onDelete: SetNull)
+  /// The Safe proposal that triggered this execution transaction (if applicable).
+  safeProposal    SafeProposal? @relation("SafeProposalExecution", fields: [safeProposalId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([actionType])
   @@index([initiatorMemberId])
   @@index([initiatorUserId])
+  @@index([safeProposalId])
   @@map("blockchain_transactions")
+}
+
+// ============================================================
+// GNOSIS SAFE — MULTI-SIG GOVERNANCE
+// ============================================================
+
+/// A pending or executed Gnosis Safe multi-sig governance proposal.
+/// Created by the backend when a GOVERNMENT admin action requires multi-sig approval.
+/// Examples: addBank(), addRTO(), toggleOperator(), addPoliceDept()
+///
+/// Flow:
+///   1. Backend creates SafeProposal (status=PENDING) when admin approves a B2B entity registration.
+///   2. GOVERNMENT B2BMember signs via their Ledger in the admin dashboard → SafeSignature created.
+///   3. When signatures.length >= threshold → status=THRESHOLD_MET → backend auto-calls execTransaction.
+///   4. execTransaction mined → status=EXECUTED, executionTx populated, B2BEntity.onChainId updated by indexer.
+model SafeProposal {
+  id          String             @id @default(cuid())
+  /// The Gnosis Safe contract address (MORTH_GNOSIS_SAFE_ADDRESS).
+  safeAddress String
+  /// Canonical EIP-712 transaction hash computed by protocol-kit. Used to match signatures.
+  safeTxHash  String             @unique
+  /// Target smart contract address (e.g. DigitalVehiclePassport, OwnershipToken).
+  to          String
+  /// ABI-encoded function calldata (e.g. addBank(entityId, walletAddress)).
+  calldata    String
+  /// ETH value in wei. Always "0" on this zero-gas private chain.
+  value       String             @default("0")
+  /// Safe nonce at time of proposal. Prevents replay attacks.
+  safeNonce   BigInt
+  /// Human-readable description shown in admin dashboard (e.g. "Register HDFC Bank as operator").
+  description String
+  /// The blockchain action this proposal represents. Links to BlockchainTransaction.actionType.
+  actionType  TxActionType
+  status      SafeProposalStatus @default(PENDING)
+  /// Snapshot of Safe threshold at proposal creation time (e.g. 2 for a 2-of-3 Safe).
+  threshold   Int
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  executedAt  DateTime?
+  cancelledAt DateTime?
+
+  // ── Foreign Keys ──
+  /// The GOVERNMENT B2BMember who initiated this proposal (first proposer).
+  proposedById   String
+  /// The B2BEntity being acted on (e.g. the bank being registered). Null for non-entity proposals.
+  targetEntityId String?
+
+  // ── Relations ──
+  proposedBy   B2BMember              @relation("ProposedByMember", fields: [proposedById], references: [id])
+  targetEntity B2BEntity?             @relation("ProposalTargetEntity", fields: [targetEntityId], references: [id])
+  signatures   SafeSignature[]
+  /// The on-chain transaction record created when this proposal is executed.
+  executionTx  BlockchainTransaction? @relation("SafeProposalExecution")
+
+  @@index([status])
+  @@index([safeAddress])
+  @@index([proposedById])
+  @@index([targetEntityId])
+  @@map("safe_proposals")
+}
+
+/// An individual EIP-712 off-chain signature for a SafeProposal.
+/// Collected from each Gnosis Safe owner (GOVERNMENT B2BMember) via their Ledger/MetaMask.
+/// No gas cost — purely a cryptographic message signed locally in the browser.
+model SafeSignature {
+  id           String   @id @default(cuid())
+  proposalId   String
+  /// Raw Ethereum address of the signer (must match a registered Safe owner).
+  signerWallet String
+  /// Raw EIP-712 signature bytes in hex (0x-prefixed). Verified by the Safe contract on-chain.
+  signature    String
+  signedAt     DateTime @default(now())
+  /// Resolved B2BMember who signed (matched via B2BMember.walletAddress == signerWallet).
+  memberId     String?
+
+  // ── Relations ──
+  proposal SafeProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  member   B2BMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  /// One wallet can sign each proposal exactly once.
+  @@unique([proposalId, signerWallet])
+  @@index([proposalId])
+  @@index([signerWallet])
+  @@map("safe_signatures")
 }
 
 // ============================================================

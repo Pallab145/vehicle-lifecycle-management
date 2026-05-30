@@ -45,6 +45,19 @@
   },
   {
     "type": "function",
+    "name": "SYSTEM_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "addrToPolice",
     "inputs": [
       {
@@ -75,6 +88,19 @@
         "name": "challanId",
         "type": "uint64",
         "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "cancelAllPendingChallans",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -330,7 +356,7 @@
     ],
     "outputs": [
       {
-        "name": "total",
+        "name": "",
         "type": "uint128",
         "internalType": "uint128"
       }
@@ -614,6 +640,25 @@
   },
   {
     "type": "function",
+    "name": "pendingAmount",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pendingChallanCount",
     "inputs": [
       {
@@ -780,6 +825,25 @@
   },
   {
     "type": "event",
+    "name": "AllChallansCancelledOnScrap",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "ChallanCancelled",
     "inputs": [
       {
@@ -849,6 +913,19 @@
         "type": "uint256",
         "indexed": true,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipContractLinked",
+    "inputs": [
+      {
+        "name": "ownershipContract",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -1010,6 +1087,11 @@
   },
   {
     "type": "error",
+    "name": "EntityExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
     "inputs": []
   },
@@ -1020,7 +1102,7 @@
   },
   {
     "type": "error",
-    "name": "Overflow",
+    "name": "OwnershipContractAlreadySet",
     "inputs": []
   },
   {
@@ -1045,7 +1127,17 @@
   },
   {
     "type": "error",
+    "name": "VehicleNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "VehicleNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmountNotAllowed",
     "inputs": []
   }
 ]

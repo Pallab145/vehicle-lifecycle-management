@@ -94,6 +94,12 @@ export interface VehicleScrappedEvent extends BaseNotificationEvent {
     data: { dvpId: string; scrapId: string; scrapDate: number; txHash: string };
 }
 
+/// Emitted when vehicle owner pre-authorizes a scrap center via authorizeScrap()
+export interface ScrapAuthorizedEvent extends BaseNotificationEvent {
+    type: 'SCRAP_AUTHORIZED';
+    data: { dvpId: string; scrapId: string; ownerWallet: string; txHash: string };
+}
+
 export interface VehicleAssignedToDealerEvent extends BaseNotificationEvent {
     type: 'VEHICLE_ASSIGNED_TO_DEALER';
     data: { dvpId: string; dealerWallet: string; txHash: string };
@@ -172,6 +178,11 @@ export interface ClaimFiledEvent extends BaseNotificationEvent {
     data: { polId: string; claimNum: number; txHash: string };
 }
 
+export interface PolicyTerminatedEvent extends BaseNotificationEvent {
+    type: 'POLICY_TERMINATED';
+    data: { polId: string; ownTid: string; txHash: string };
+}
+
 // ─── PUC Events ───────────────────────────────────────────────────────────
 
 export interface PucIssuedEvent extends BaseNotificationEvent {
@@ -184,16 +195,37 @@ export interface PucExpiredEvent extends BaseNotificationEvent {
     data: { certId: string; txHash: string };
 }
 
+export interface PucTerminatedEvent extends BaseNotificationEvent {
+    type: 'PUC_TERMINATED';
+    data: { certId: string; ownTid: string; txHash: string };
+}
+
 // ─── Loan Events ──────────────────────────────────────────────────────────
 
 export interface LoanRegEvent extends BaseNotificationEvent {
     type: 'LOAN_REG';
-    data: { loanId: string; ownTid: string; bankId: string; amount: string; txHash: string };
+    data: { loanId: string; dvpId: string; bankId: string; amount: string; txHash: string };
+}
+
+export interface LoanRefinancedEvent extends BaseNotificationEvent {
+    type: 'LOAN_REFINANCED';
+    data: { oldLoanId: string; newLoanId: string; dvpId: string; txHash: string };
+}
+
+export interface PendingLoanAttachedEvent extends BaseNotificationEvent {
+    type: 'PENDING_LOAN_ATTACHED';
+    data: { dvpId: string; bankId: string; borrower: string; amount: string; txHash: string };
+}
+
+export interface PendingLoanCancelledEvent extends BaseNotificationEvent {
+    type: 'PENDING_LOAN_CANCELLED';
+    data: { dvpId: string; bankId: string; txHash: string };
 }
 
 export interface NocIssuedEvent extends BaseNotificationEvent {
     type: 'NOC_ISSUED';
-    data: { loanId: string; ownTid: string; ownerWallet: string; txHash: string };
+    // owner wallet only present if NOCMinted also fired (registered vehicle)
+    data: { loanId: string; dvpId?: string; ownerWallet?: string; txHash: string };
 }
 
 // ─── Generic Transaction Status Event ───────────────────────────────────────
@@ -227,6 +259,7 @@ export type NotificationEvent =
     | VehicleMfgEvent
     | StatusChangeEvent
     | VehicleScrappedEvent
+    | ScrapAuthorizedEvent
     | VehicleAssignedToDealerEvent
     | VehicleRegEvent
     | XferInitEvent
@@ -239,10 +272,15 @@ export type NotificationEvent =
     | ChallanPaidEvent
     | ChallanCancelledEvent
     | PolicyIssuedEvent
-    | PolicyExpiredEvent
     | ClaimFiledEvent
+    | PolicyExpiredEvent
+    | PolicyTerminatedEvent
     | PucIssuedEvent
     | PucExpiredEvent
+    | PucTerminatedEvent
     | LoanRegEvent
     | NocIssuedEvent
+    | LoanRefinancedEvent
+    | PendingLoanAttachedEvent
+    | PendingLoanCancelledEvent
     | TxStatusChangeEvent;

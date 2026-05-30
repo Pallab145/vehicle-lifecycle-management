@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "./BaseSetup.t.sol";
+import "../src/IVehicleContracts.sol";
 
 contract OwnershipTokenTest is BaseSetup {
     

@@ -4,10 +4,10 @@ import { getRedisClient } from '@/lib/redis';
 import prisma from '@/lib/prisma';
 import { env } from '@/config/env';
 import { logger } from '@/lib/logger';
-import { 
+import {
     SyncStatus, 
     TxActionType, 
-    EntityType, 
+    SafeProposalStatus,
     VehicleStatus, 
     TransferStatus, 
     ChallanStatus, 
@@ -15,10 +15,10 @@ import {
     PucStatus, 
     LoanStatus,
     RegistrationStatus,
-    type BlockchainTransaction, 
-    type B2BEntity 
+    type BlockchainTransaction
 } from '@/generated/prisma/client';
 import { RECONCILIATION_QUEUE_NAME } from './reconciliation.queue';
+import { safeExecutionQueue } from './safe-execution.queue';
 import { workerManager } from '@/lib/worker-manager';
 
 // Import ABIs for event parsing
@@ -118,6 +118,30 @@ async function reconcileTransactions() {
         // Update cursor to the last processed item for the next iteration
         cursor = stuckTxs[stuckTxs.length - 1].id;
     }
+
+    // ── FIX 3: Stuck THRESHOLD_MET proposals sweep ────────────────────────────
+    // If the BullMQ job was lost (Redis restart, failed delivery), a proposal
+    // can reach THRESHOLD_MET but never have execTransaction() called on it.
+    // There will be NO BlockchainTransaction record (executionTx === null).
+    // We auto-recover by re-queuing the job.
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const stuckProposals = await prisma.safeProposal.findMany({
+        where: {
+            status: SafeProposalStatus.THRESHOLD_MET,
+            updatedAt: { lt: tenMinutesAgo },
+            executionTx: null   // No BlockchainTransaction → job never ran
+        },
+        take: 10,
+        orderBy: { updatedAt: 'asc' }
+    });
+
+    if (stuckProposals.length > 0) {
+        logger.warn({ count: stuckProposals.length }, 'Reconciler: Found stuck THRESHOLD_MET proposals — re-queueing execution jobs');
+        for (const p of stuckProposals) {
+            logger.warn({ proposalId: p.id, stuckSince: p.updatedAt }, 'Reconciler: Re-queueing stuck proposal');
+            await safeExecutionQueue.add('executeSafeTx', { proposalId: p.id });
+        }
+    }
 }
 
 // Returns a Map<eventName, LogDescription> containing the first occurrence of each event.
@@ -154,47 +178,95 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
             data: { status: SyncStatus.MINED, blockNumber: receipt.blockNumber }
         });
 
-        if (tx.actionType === TxActionType.B2B_ENTITY_REGISTER && tx.b2bEntityId) {
-            const entity = await db.b2BEntity.findUnique({ where: { id: tx.b2bEntityId } });
-            if (!entity) return;
-
-            const onChainId = extractEntityIdFromReceipt(entity, receipt);
-            if (onChainId === null) {
-                throw new Error('Failed to parse onChainId from receipt logs during B2B_ENTITY_REGISTER reconciliation');
-            }
-
-            await db.b2BEntity.update({
-                where: { id: entity.id },
-                data: { onChainId: Number(onChainId) }
-            });
-        } 
-        else if (tx.actionType === TxActionType.B2B_ENTITY_TOGGLE && tx.b2bEntityId) {
-            const entity = await db.b2BEntity.findUnique({ where: { id: tx.b2bEntityId } });
-            if (!entity) return;
-
-            // Parse toggle log depending on the entity type
-            // All toggle events are pre-parsed in the events map; just look up by eventName.
-
-            let eventName = '';
-            switch (entity.type) {
-                case EntityType.MANUFACTURER: eventName = 'MfgToggled'; break;
-                case EntityType.SCRAP_CENTER: eventName = 'ScrapToggled'; break;
-                case EntityType.RTO:          eventName = 'RTOStatusToggled'; break;
-                case EntityType.POLICE:       eventName = 'PoliceStatusToggled'; break;
-                case EntityType.INSURANCE:    eventName = 'InsStatusToggled'; break;
-                case EntityType.PUC_CENTER:   eventName = 'CenterStatusToggled'; break;
-                case EntityType.BANK:         eventName = 'BankStatusToggled'; break;
-                default:
-                    return;
-            }
-
-            const event = events.get(eventName);
-            if (event) {
-                const active = event.args[1] as boolean;
-                await db.b2BEntity.update({
-                    where: { id: entity.id },
-                    data: { isActive: active }
+        // ── SAFE_EXEC: Gnosis Safe execTransaction succeeded ──────────────────
+        // Primary job: mark the SafeProposal EXECUTED.
+        //
+        // Secondary job: replay any business-level side-effect the indexer missed.
+        //   - Registration:  the entity's onChainId is set by the indexer when it
+        //     catches RTOReg / MfgReg / etc.  If the indexer missed the event,
+        //     onChainId stays null — the entity can never be used on-chain.
+        //     We back-fill it here by parsing the first *Reg event in the receipt.
+        //   - Toggle:  same logic — isActive must match the on-chain state.
+        //   - CHALLAN_CANCEL via adminCancelChallan: the ChallanCancelled event is
+        //     emitted inside the Safe execTransaction. If the indexer missed it we
+        //     must update challan.status here, otherwise the challan stays PENDING
+        //     forever even though the Safe proposal is EXECUTED.
+        if (tx.actionType === TxActionType.SAFE_EXEC && tx.safeProposalId) {
+            const proposal = await db.safeProposal.findUnique({ where: { id: tx.safeProposalId } });
+            if (proposal && proposal.status !== SafeProposalStatus.EXECUTED) {
+                await db.safeProposal.update({
+                    where: { id: tx.safeProposalId },
+                    data: { status: SafeProposalStatus.EXECUTED, executedAt: new Date() }
                 });
+                logger.info({ proposalId: tx.safeProposalId, txHash: tx.txHash },
+                    'Reconciler: Marked SafeProposal EXECUTED (indexer missed ExecutionSuccess event)');
+            }
+
+            // ── Side-effect replay: entity registration ───────────────────────
+            // All entity-type registration events share the same arg structure:
+            //   args[0] = onChainId (uint64)   args[1] = code (string)
+            // We use proposal.targetEntityId directly instead of looking up by code.
+            if (proposal?.actionType === TxActionType.B2B_ENTITY_REGISTER && proposal.targetEntityId) {
+                const REG_EVENTS = ['RTOReg', 'MfgReg', 'PoliceReg', 'InsReg', 'CenterReg', 'BankReg', 'ScrapReg'];
+                for (const evName of REG_EVENTS) {
+                    const regEvent = events.get(evName);
+                    if (regEvent) {
+                        const onChainId = Number(regEvent.args[0]);
+                        // updateMany with onChainId:null guard makes this idempotent
+                        const updated = await db.b2BEntity.updateMany({
+                            where: { id: proposal.targetEntityId, onChainId: null },
+                            data: { onChainId }
+                        });
+                        if (updated.count > 0) {
+                            logger.info({ entityId: proposal.targetEntityId, onChainId, evName },
+                                'Reconciler: Entity onChainId back-filled (indexer missed registration event)');
+                        }
+                        break; // Only one Reg event can be in a single Safe execTransaction
+                    }
+                }
+            }
+
+            // ── Side-effect replay: entity toggle ─────────────────────────────
+            // All toggle events share: args[0] = onChainId, args[1] = active (bool)
+            if (proposal?.actionType === TxActionType.B2B_ENTITY_TOGGLE && proposal.targetEntityId) {
+                const TOGGLE_EVENTS = ['RTOStatusToggled', 'MfgToggled', 'PoliceStatusToggled',
+                                       'InsStatusToggled', 'CenterStatusToggled', 'BankStatusToggled', 'ScrapToggled'];
+                for (const evName of TOGGLE_EVENTS) {
+                    const toggleEvent = events.get(evName);
+                    if (toggleEvent) {
+                        const isActive = toggleEvent.args[1] as boolean;
+                        await db.b2BEntity.update({
+                            where: { id: proposal.targetEntityId },
+                            data: { isActive }
+                        });
+                        logger.info({ entityId: proposal.targetEntityId, isActive, evName },
+                            'Reconciler: Entity isActive back-filled (indexer missed toggle event)');
+                        break;
+                    }
+                }
+            }
+
+            // ── Side-effect replay: admin challan cancel ──────────────────────
+            // All three args of ChallanCancelled:
+            //   args[0] = challanId (uint64 indexed)
+            //   args[1] = ownTid   (uint256 indexed)
+            //   args[2] = isAdminCancel (bool)
+            if (proposal?.actionType === TxActionType.CHALLAN_CANCEL) {
+                const cancelEvent = events.get('ChallanCancelled');
+                if (cancelEvent) {
+                    const challanId = cancelEvent.args[0] as bigint;
+                    const isAdminCancel = cancelEvent.args[2] as boolean;
+                    const challan = await db.challan.findUnique({ where: { challanId } });
+                    if (challan && challan.status !== ChallanStatus.CANCELLED) {
+                        const cancelledAt = await getBlockTimestamp(receipt.blockNumber);
+                        await db.challan.update({
+                            where: { challanId },
+                            data: { status: ChallanStatus.CANCELLED, cancelledAt, isAdminCancel }
+                        });
+                        logger.info({ challanId: String(challanId) },
+                            'Reconciler: Admin challan cancellation back-filled (indexer missed ChallanCancelled event)');
+                    }
+                }
             }
         }
         else if (tx.actionType === TxActionType.VEHICLE_MINT && tx.passportId) {
@@ -213,13 +285,23 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
         else if (tx.actionType === TxActionType.VEHICLE_SCRAP && tx.passportId) {
             const event = events.get('VehicleScrapped');
             if (event) {
+                // event: VehicleScrapped(uint256 tokenId, uint64 scrapId, uint32 scrapDate)
+                const scrapId   = event.args[1];
                 const scrapDate = event.args[2];
+                // FIX #5: resolve scrapEntityId from on-chain scrapId
+                const scrapEntity = await db.b2BEntity.findFirst({ where: { onChainId: Number(scrapId) } });
                 await db.vehiclePassport.update({
                     where: { id: tx.passportId },
                     data: {
                         status: VehicleStatus.SCRAPPED,
-                        scrapDate: new Date(Number(scrapDate) * 1000)
+                        scrapDate: new Date(Number(scrapDate) * 1000),
+                        scrapEntityId: scrapEntity?.id || null
                     }
+                });
+                // Also deactivate ownership — mirrors what handleVehicleScrapped does
+                await db.vehicleOwnership.updateMany({
+                    where: { passportId: tx.passportId },
+                    data: { isActive: false }
                 });
             }
         }
@@ -447,19 +529,20 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
                 await db.insurancePolicy.update({
                     where: { id: tx.insuranceId },
                     data: {
-                        polId: Number(event.args[0]),
+                        polId: BigInt(event.args[0]),  // Must be BigInt — not Number() to avoid precision loss
                         status: InsuranceStatus.ACTIVE
                     }
                 });
             }
         }
         else if (tx.actionType === TxActionType.INSURANCE_CLAIM && tx.insuranceId) {
-            // FIX #6: Handle ClaimFiled(polId, claimNum) — increment claimCount.
+            // ClaimFiled(polId, claimNum) — claimNum is the new ABSOLUTE total, not a delta.
+            // Use absolute value to stay consistent with the indexer.
             const event = events.get('ClaimFiled');
             if (event) {
                 await db.insurancePolicy.update({
                     where: { id: tx.insuranceId },
-                    data: { claimCount: { increment: 1 } }
+                    data: { claimCount: Number(event.args[1]) } // Absolute count from chain
                 });
             }
         }
@@ -496,35 +579,116 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
                 data: { status: PucStatus.EXPIRED }
             });
         }
-        else if (tx.actionType === TxActionType.LOAN_DISBURSE && tx.loanId) {
+        else if (tx.actionType === TxActionType.LOAN_REG && tx.loanId) {
+            // LoanReg(uint64 loanId, uint256 dvpId, uint64 bankId, address borrower, uint128 amount)
+            // args[0] = loanId — must be stored as BigInt to match the Prisma unique field type
             const event = events.get('LoanReg');
             if (event) {
-                const loanId = event.args[0];
+                const loanId = BigInt(event.args[0]);
+                const borrower = event.args[3] as string;
+                const borrowerUser = await db.user.findUnique({ where: { walletAddress: borrower.toLowerCase() } });
                 await db.loanRecord.update({
                     where: { id: tx.loanId },
                     data: {
-                        loanId: Number(loanId),
-                        status: LoanStatus.ACTIVE
+                        loanId,
+                        status:         LoanStatus.ACTIVE,
+                        borrowerUserId: borrowerUser?.id || null,
                     }
                 });
             }
         }
         else if (tx.actionType === TxActionType.LOAN_CLEAR && tx.loanId) {
-            const event = events.get('NOCIssued');
-            if (event) {
-                const owner = event.args[2] as string;
-                const ownerUser = await db.user.findUnique({ where: { walletAddress: owner } });
-
+            // NOCIssued(uint64 loanId, uint256 dvpId) — only 2 params, owner comes from NOCMinted
+            // NOCMinted(uint64 loanId, address owner) — minted only for registered vehicles
+            const nocIssuedEvent = events.get('NOCIssued');
+            if (nocIssuedEvent) {
                 await db.loanRecord.update({
                     where: { id: tx.loanId },
                     data: {
-                        status: LoanStatus.CLEARED,
+                        status:    LoanStatus.CLEARED,
+                        clearedAt: new Date(),
                         nocIssued: true,
-                        nocDate: new Date(),
-                        nocRecipientWallet: owner,
-                        nocRecipientUserId: ownerUser?.id || null
+                        nocDate:   new Date(),
                     }
                 });
+            }
+            // NOCMinted is optional (only for registered vehicles) — update recipient if present
+            const nocMintedEvent = events.get('NOCMinted');
+            if (nocMintedEvent) {
+                const owner = nocMintedEvent.args[1] as string; // args[1] = owner in NOCMinted(loanId, owner)
+                const ownerUser = await db.user.findUnique({ where: { walletAddress: owner.toLowerCase() } });
+                await db.loanRecord.update({
+                    where: { id: tx.loanId },
+                    data: {
+                        nocRecipientWallet: owner.toLowerCase(),
+                        nocRecipientUserId: ownerUser?.id || null,
+                    }
+                });
+            }
+        }
+        else if (tx.actionType === TxActionType.LOAN_CANCEL_PENDING && tx.loanId) {
+            // PendingLoanCancelled(uint256 dvpId, uint64 bankId)
+            // The indexer's handlePendingLoanCancelled deletes the record.
+            // As a fallback, if the worker processes the receipt first or indexer missed it:
+            logger.info({ loanId: tx.loanId }, 'Reconciler: LOAN_CANCEL_PENDING confirmed — deleting pending loan record.');
+            await db.loanRecord.delete({ where: { id: tx.loanId } }).catch(() => {});
+        }
+        else if (tx.actionType === TxActionType.LOAN_REFINANCE && tx.loanId) {
+            // LoanRefinanced(uint64 oldLoanId, uint64 newLoanId, uint256 dvpId)
+            // The indexer's handleLoanRefinanced already closed the old loan when it fired.
+            // Here we just ensure the old loan is CLEARED in case the indexer missed it.
+            const event = events.get('LoanRefinanced');
+            if (event) {
+                await db.loanRecord.update({
+                    where: { id: tx.loanId },
+                    data: {
+                        status:    LoanStatus.CLEARED,
+                        clearedAt: new Date(),
+                        nocIssued: true,
+                        nocDate:   new Date(),
+                    }
+                });
+
+                // As a fallback, also process the LoanReg event emitted in the same tx to create the new loan
+                const regEvent = events.get('LoanReg');
+                if (regEvent) {
+                    const newLoanId = BigInt(regEvent.args[0]);
+                    const dvpId = BigInt(regEvent.args[1]);
+                    const bankId = BigInt(regEvent.args[2]);
+                    const borrower = regEvent.args[3] as string;
+                    const amount = BigInt(regEvent.args[4]);
+                    const tenure = Number(regEvent.args[5]);
+
+                    const [bankEntity, passport, borrowerUser] = await Promise.all([
+                        db.b2BEntity.findFirst({ where: { onChainId: Number(bankId) } }),
+                        db.vehiclePassport.findUnique({ where: { dvpId } }),
+                        db.user.findUnique({ where: { walletAddress: borrower.toLowerCase() } })
+                    ]);
+
+                    if (passport && bankEntity) {
+                        await db.loanRecord.upsert({
+                            where: { loanId: newLoanId },
+                            create: {
+                                loanId:            newLoanId,
+                                passportId:        passport.id,
+                                lenderEntityId:    bankEntity.id,
+                                borrowerWallet:    borrower.toLowerCase(),
+                                borrowerUserId:    borrowerUser?.id || null,
+                                amount:            amount.toString(),
+                                tenure:            tenure,
+                                status:            LoanStatus.ACTIVE,
+                                disbursedAt:       new Date(),
+                                nocIssued:         false,
+                                createdByMemberId: tx.initiatorMemberId || null
+                            },
+                            update: {
+                                loanId:         newLoanId,
+                                status:         LoanStatus.ACTIVE,
+                                borrowerUserId: borrowerUser?.id || null,
+                            }
+                        });
+                    }
+                }
             }
         }
     });
@@ -535,9 +699,17 @@ async function handleSuccessfulReconciliation(tx: BlockchainTransaction, receipt
 // the whole transaction rolled back, preventing subsequent compensations from running.
 async function handleRevertedRollback(tx: BlockchainTransaction) {
     const db = prisma; // Use global client; each operation is independent best-effort.
-        if (tx.actionType === TxActionType.B2B_ENTITY_REGISTER && tx.b2bEntityId) {
-            logger.warn({ b2bEntityId: tx.b2bEntityId }, 'Saga Rollback: Deleting local B2BEntity as registration failed.');
-            await db.b2BEntity.delete({ where: { id: tx.b2bEntityId } }).catch(() => {});
+        // ── SAFE_EXEC: Gnosis Safe execTransaction reverted ──────────────────
+        // The inner Safe transaction reverted (bad calldata, contract rejected it).
+        // Mark the proposal EXECUTION_FAILED so the admin can retry via the
+        // governance dashboard (POST /admin/proposals/:id/execute).
+        if (tx.actionType === TxActionType.SAFE_EXEC && tx.safeProposalId) {
+            logger.warn({ safeProposalId: tx.safeProposalId, txHash: tx.txHash },
+                'Saga Rollback: SAFE_EXEC reverted — marking SafeProposal EXECUTION_FAILED');
+            await db.safeProposal.update({
+                where: { id: tx.safeProposalId },
+                data: { status: SafeProposalStatus.EXECUTION_FAILED }
+            }).catch(() => {});
         }
         else if (tx.actionType === TxActionType.VEHICLE_MINT && tx.passportId) {
             logger.warn({ passportId: tx.passportId }, 'Saga Rollback: Deleting local VehiclePassport as mint failed.');
@@ -645,26 +817,60 @@ async function handleRevertedRollback(tx: BlockchainTransaction) {
             logger.warn({ insuranceId: tx.insuranceId }, 'Saga Rollback: Deleting InsurancePolicy.');
             await db.insurancePolicy.delete({ where: { id: tx.insuranceId } }).catch(() => {});
         }
+        else if (tx.actionType === TxActionType.INSURANCE_CLAIM && tx.insuranceId) {
+            logger.warn({ insuranceId: tx.insuranceId }, 'Saga Rollback: Reverting Insurance Claim (decrement claimCount).');
+            await db.insurancePolicy.update({ 
+                where: { id: tx.insuranceId },
+                data: { claimCount: { decrement: 1 } }
+            }).catch(() => {});
+        }
+        else if (tx.actionType === TxActionType.INSURANCE_EXPIRE && tx.insuranceId) {
+            logger.warn({ insuranceId: tx.insuranceId }, 'Saga Rollback: Reverting Insurance Expiration (restoring ACTIVE).');
+            await db.insurancePolicy.update({ 
+                where: { id: tx.insuranceId },
+                data: { status: InsuranceStatus.ACTIVE }
+            }).catch(() => {});
+        }
         else if (tx.actionType === TxActionType.PUC_ISSUE && tx.pucId) {
             logger.warn({ pucId: tx.pucId }, 'Saga Rollback: Deleting PucCertificate.');
             await db.pucCertificate.delete({ where: { id: tx.pucId } }).catch(() => {});
         }
-        else if (tx.actionType === TxActionType.LOAN_DISBURSE && tx.loanId) {
-            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: Deleting LoanRecord.');
+        else if (tx.actionType === TxActionType.PUC_EXPIRE && tx.pucId) {
+            logger.warn({ pucId: tx.pucId }, 'Saga Rollback: Reverting Puc Expiration (restoring VALID).');
+            await db.pucCertificate.update({ 
+                where: { id: tx.pucId },
+                data: { status: PucStatus.VALID }
+            }).catch(() => {});
+        }
+        else if (tx.actionType === TxActionType.LOAN_REG && tx.loanId) {
+            // registerLoan reverted — delete the pre-created PENDING LoanRecord
+            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: Deleting PENDING LoanRecord (registerLoan reverted).');
             await db.loanRecord.delete({ where: { id: tx.loanId } }).catch(() => {});
         }
         else if (tx.actionType === TxActionType.LOAN_CLEAR && tx.loanId) {
-            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: Reverting Loan clearance.');
+            // issueNOC reverted — undo the status change (loan stays ACTIVE)
+            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: Reverting NOC issuance (issueNOC reverted).');
             await db.loanRecord.update({
                 where: { id: tx.loanId },
                 data: {
-                    status: LoanStatus.ACTIVE,
-                    nocIssued: false,
-                    nocDate: null,
+                    status:             LoanStatus.ACTIVE,
+                    clearedAt:          null,
+                    nocIssued:          false,
+                    nocDate:            null,
                     nocRecipientWallet: null,
-                    nocRecipientUserId: null
+                    nocRecipientUserId: null,
                 }
             }).catch(() => {});
+        }
+        else if (tx.actionType === TxActionType.LOAN_CANCEL_PENDING && tx.loanId) {
+            // cancelPendingLoan reverted — keep the PENDING loan record alive so the bank can retry
+            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: cancelPendingLoan reverted — loan record remains PENDING.');
+            // No DB update needed — the loan record was never modified by the service before submission
+        }
+        else if (tx.actionType === TxActionType.LOAN_REFINANCE && tx.loanId) {
+            // refinanceLoan reverted — the old loan should remain ACTIVE (it was never modified in DB before tx)
+            logger.warn({ loanId: tx.loanId }, 'Saga Rollback: refinanceLoan reverted — old loan remains ACTIVE.');
+            // No DB update needed — the service never touched the old loan record before submitting the tx
         }
         else if (tx.actionType === TxActionType.INSURANCE_CLAIM && tx.insuranceId) {
             logger.warn({ insuranceId: tx.insuranceId }, 'Saga Rollback: Reverting insurance claim count.');
@@ -689,31 +895,4 @@ async function handleRevertedRollback(tx: BlockchainTransaction) {
         }
 }
 
-// FIX #9: Must filter by SPECIFIC event name per entity type.
-// Previous bug: returned args[0] of the first parseable DVP log which could be a VehicleMfg tokenId,
-// not the mfgId — causing garbage onChainId to be written.
-const ENTITY_REG_EVENT: Partial<Record<EntityType, { eventName: string; iface: Interface }>> = {
-    [EntityType.MANUFACTURER]:  { eventName: 'MfgReg',            iface: interfaces.dvp },
-    [EntityType.SCRAP_CENTER]:  { eventName: 'ScrapReg',          iface: interfaces.dvp },
-    [EntityType.RTO]:           { eventName: 'RTOReg',            iface: interfaces.ownership },
-    [EntityType.POLICE]:        { eventName: 'PoliceReg',         iface: interfaces.challan },
-    [EntityType.INSURANCE]:     { eventName: 'InsReg',            iface: interfaces.insurance },
-    [EntityType.PUC_CENTER]:    { eventName: 'CenterReg',         iface: interfaces.puc },
-    [EntityType.BANK]:          { eventName: 'BankReg',           iface: interfaces.loan },
-};
 
-function extractEntityIdFromReceipt(entity: B2BEntity, receipt: TransactionReceipt): bigint | null {
-    const meta = ENTITY_REG_EVENT[entity.type];
-    if (!meta) return null;
-
-    for (const log of receipt.logs) {
-        try {
-            const parsed = meta.iface.parseLog({ topics: log.topics as string[], data: log.data });
-            // Only accept the registration event — reject tokenId logs from same contract.
-            if (parsed && parsed.name === meta.eventName && parsed.args[0] !== undefined) {
-                return BigInt(parsed.args[0]);
-            }
-        } catch { continue; }
-    }
-    return null;
-}

@@ -8,6 +8,7 @@ import "../src/InsuranceToken.sol";
 import "../src/PUCToken.sol";
 import "../src/LoanContract.sol";
 import "../src/ChallanContract.sol";
+import "../src/IVehicleContracts.sol";
 
 contract VehicleSystemTest is Test {
     DigitalVehiclePassport dvp;
@@ -37,13 +38,16 @@ contract VehicleSystemTest is Test {
         ownership = new OwnershipToken(address(dvp));
         insurance = new InsuranceToken();
         puc = new PUCToken();
-        loan = new LoanContract();
+        loan = new LoanContract(address(dvp));
         challan = new ChallanContract();
         
         // 2. Link contracts
         ownership.setContracts(address(insurance), address(puc), address(loan), address(challan));
         dvp.setOwnershipContract(address(ownership));
         challan.setOwnershipContract(address(ownership));
+        loan.setOwnershipContract(address(ownership));
+        insurance.setOwnershipContract(address(ownership));
+        puc.setOwnershipContract(address(ownership));
         
         // 3. Register Entities & Grant Roles
         dvp.regMfg("MFG01", mfg);
@@ -52,6 +56,15 @@ contract VehicleSystemTest is Test {
         challan.regPolice("POL01", police);
         loan.regBank("BNK01", bank);
         puc.regCenter("PUC01", pucCenter);
+        
+        // 4. Grant SYSTEM_ROLE permissions
+        ownership.grantRole(ownership.SYSTEM_ROLE(), address(dvp));
+        insurance.grantRole(insurance.SYSTEM_ROLE(), address(dvp));
+        puc.grantRole(puc.SYSTEM_ROLE(), address(dvp));
+        challan.grantRole(challan.SYSTEM_ROLE(), address(dvp));
+        
+        ownership.grantRole(ownership.SYSTEM_ROLE(), address(loan));
+        loan.grantRole(loan.SYSTEM_ROLE(), address(ownership));
         
         vm.stopPrank();
     }
@@ -81,7 +94,7 @@ contract VehicleSystemTest is Test {
     
     function _issueValidCompliance(uint256 ownTid) internal {
         vm.prank(insurer);
-        insurance.issuePolicy(ownTid, seller, uint32(block.timestamp + 365 days), 50000, 1000);
+        insurance.issuePolicy(ownTid, uint32(block.timestamp + 365 days), 50000, 1000);
         
         vm.prank(pucCenter);
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);
@@ -202,12 +215,12 @@ contract VehicleSystemTest is Test {
     }
     
     function testTransferBlockedByLoan() public {
-        (, uint256 ownTid) = _createAndRegisterVehicle();
+        (uint256 dvpId, uint256 ownTid) = _createAndRegisterVehicle();
         _issueValidCompliance(ownTid);
         
         // Bank registers a loan
         vm.prank(bank);
-        loan.registerLoan(ownTid, 10000, 24);
+        loan.registerLoan(dvpId, seller, 10000, 24);
         
         vm.prank(seller);
         ownership.initTransfer(ownTid, buyer);
@@ -226,7 +239,7 @@ contract VehicleSystemTest is Test {
         
         // Issue insurance that expires in 1 day
         vm.prank(insurer);
-        insurance.issuePolicy(ownTid, seller, uint32(block.timestamp + 1 days), 50000, 1000);
+        insurance.issuePolicy(ownTid, uint32(block.timestamp + 1 days), 50000, 1000);
         
         // Issue valid PUC
         vm.prank(pucCenter);
@@ -252,7 +265,7 @@ contract VehicleSystemTest is Test {
         
         // Issue valid insurance
         vm.prank(insurer);
-        insurance.issuePolicy(ownTid, seller, uint32(block.timestamp + 365 days), 50000, 1000);
+        insurance.issuePolicy(ownTid, uint32(block.timestamp + 365 days), 50000, 1000);
         
         // Issue PUC that expires in 1 day
         vm.prank(pucCenter);

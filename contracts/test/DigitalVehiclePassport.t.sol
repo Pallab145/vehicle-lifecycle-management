@@ -100,6 +100,10 @@ contract DigitalVehiclePassportTest is BaseSetup {
         vm.prank(admin);
         dvp.regScrap("SCRP01", sc);
         
+        // Authorize scrap center
+        vm.prank(seller);
+        dvp.authorizeScrap(dvpId, "SCRP01");
+        
         vm.prank(sc);
         dvp.scrapVehicle(dvpId);
         

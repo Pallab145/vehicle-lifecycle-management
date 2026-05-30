@@ -1,7 +1,13 @@
 [
   {
     "type": "constructor",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "_dvp",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -33,6 +39,19 @@
   {
     "type": "function",
     "name": "DEFAULT_ADMIN_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SYSTEM_ROLE",
     "inputs": [],
     "outputs": [
       {
@@ -149,6 +168,75 @@
   },
   {
     "type": "function",
+    "name": "cancelPendingLoan",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "dvpContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IDigitalVehiclePassport"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "dvpToLoan",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getActiveLoanBorrower",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "hasLoan",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "borrower",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getApproved",
     "inputs": [
       {
@@ -224,14 +312,19 @@
             "internalType": "uint64"
           },
           {
-            "name": "ownTid",
-            "type": "uint64",
-            "internalType": "uint64"
+            "name": "dvpId",
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "bankId",
             "type": "uint64",
             "internalType": "uint64"
+          },
+          {
+            "name": "borrower",
+            "type": "address",
+            "internalType": "address"
           },
           {
             "name": "issueDate",
@@ -264,6 +357,25 @@
             "internalType": "uint128"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLoanBorrower",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -283,72 +395,6 @@
         "name": "",
         "type": "bytes32",
         "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getVehicleLoan",
-    "inputs": [
-      {
-        "name": "ownTid",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct LoanContract.Loan",
-        "components": [
-          {
-            "name": "loanId",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "ownTid",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "bankId",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "issueDate",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "nocDate",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "tenure",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "active",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "nocIssued",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "amount",
-            "type": "uint128",
-            "internalType": "uint128"
-          }
-        ]
       }
     ],
     "stateMutability": "view"
@@ -376,7 +422,7 @@
     "name": "hasActiveLoan",
     "inputs": [
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -462,7 +508,7 @@
     "name": "isLoanCleared",
     "inputs": [
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -481,14 +527,9 @@
     "name": "issueNOC",
     "inputs": [
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "owner",
-        "type": "address",
-        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -511,14 +552,19 @@
         "internalType": "uint64"
       },
       {
-        "name": "ownTid",
-        "type": "uint64",
-        "internalType": "uint64"
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "bankId",
         "type": "uint64",
         "internalType": "uint64"
+      },
+      {
+        "name": "borrower",
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "issueDate",
@@ -568,25 +614,6 @@
   },
   {
     "type": "function",
-    "name": "ownToLoan",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "ownerOf",
     "inputs": [
       {
@@ -603,6 +630,48 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ownershipContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IOwnershipToken"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "refinanceLoan",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "newAmount",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "newTenure",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "newLoanId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -627,9 +696,14 @@
     "name": "registerLoan",
     "inputs": [
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "buyer",
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "amount",
@@ -758,6 +832,19 @@
   },
   {
     "type": "function",
+    "name": "setOwnershipContract",
+    "inputs": [
+      {
+        "name": "_own",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "supportsInterface",
     "inputs": [
       {
@@ -787,6 +874,45 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "systemActivatePendingLoan",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bankId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "borrower",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "tenure",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -939,6 +1065,50 @@
   },
   {
     "type": "event",
+    "name": "ContractsLinked",
+    "inputs": [
+      {
+        "name": "ownership",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "dvp",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LoanRefinanced",
+    "inputs": [
+      {
+        "name": "oldLoanId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "newLoanId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "LoanReg",
     "inputs": [
       {
@@ -948,7 +1118,7 @@
         "internalType": "uint64"
       },
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "indexed": true,
         "internalType": "uint256"
@@ -958,6 +1128,12 @@
         "type": "uint64",
         "indexed": true,
         "internalType": "uint64"
+      },
+      {
+        "name": "borrower",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       },
       {
         "name": "amount",
@@ -979,16 +1155,79 @@
         "internalType": "uint64"
       },
       {
-        "name": "ownTid",
+        "name": "dvpId",
         "type": "uint256",
         "indexed": true,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NOCMinted",
+    "inputs": [
+      {
+        "name": "loanId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
       },
       {
         "name": "owner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PendingLoanAttached",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bankId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "borrower",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PendingLoanCancelled",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bankId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
       }
     ],
     "anonymous": false
@@ -1244,6 +1483,11 @@
   },
   {
     "type": "error",
+    "name": "LoanNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "LoanNotFound",
     "inputs": []
   },
@@ -1254,12 +1498,32 @@
   },
   {
     "type": "error",
-    "name": "Overflow",
+    "name": "NocTransferBlocked",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnershipContractAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnershipContractNotSet",
     "inputs": []
   },
   {
     "type": "error",
     "name": "Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VehicleDeactivated",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VehicleNotFound",
     "inputs": []
   }
 ]

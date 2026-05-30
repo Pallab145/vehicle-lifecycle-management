@@ -28,6 +28,7 @@ abstract contract BaseSetup is Test {
     
     address seller = address(10);
     address buyer = address(11);
+    address bank2 = address(12);
     
     function setUp() public virtual {
         vm.startPrank(admin);
@@ -37,12 +38,18 @@ abstract contract BaseSetup is Test {
         ownership = new OwnershipToken(address(dvp));
         insurance = new InsuranceToken();
         puc = new PUCToken();
-        loan = new LoanContract();
+        loan = new LoanContract(address(dvp));
         challan = new ChallanContract();
         
         // 2. Link contracts
         ownership.setContracts(address(insurance), address(puc), address(loan), address(challan));
+        
         dvp.setOwnershipContract(address(ownership));
+        dvp.setComplianceContracts(address(loan), address(challan), address(insurance), address(puc));
+
+        insurance.setOwnershipContract(address(ownership));
+        puc.setOwnershipContract(address(ownership));
+        loan.setOwnershipContract(address(ownership));
         challan.setOwnershipContract(address(ownership));
         
         // 3. Register Entities & Grant Roles
@@ -51,7 +58,20 @@ abstract contract BaseSetup is Test {
         insurance.regIns("INS01", insurer);
         challan.regPolice("POL01", police);
         loan.regBank("BNK01", bank);
+        loan.regBank("BNK02", bank2);
         puc.regCenter("PUC01", pucCenter);
+        
+        // Grant SYSTEM_ROLE to DVP for atomic cleanup
+        ownership.grantRole(ownership.SYSTEM_ROLE(), address(dvp));
+        insurance.grantRole(insurance.SYSTEM_ROLE(), address(dvp));
+        puc.grantRole(puc.SYSTEM_ROLE(), address(dvp));
+        challan.grantRole(challan.SYSTEM_ROLE(), address(dvp));
+        
+        // Grant SYSTEM_ROLE to LoanContract for attachPendingLoan
+        ownership.grantRole(ownership.SYSTEM_ROLE(), address(loan));
+        
+        // Grant SYSTEM_ROLE to OwnershipToken for systemActivatePendingLoan
+        loan.grantRole(loan.SYSTEM_ROLE(), address(ownership));
         
         vm.stopPrank();
     }
@@ -78,7 +98,7 @@ abstract contract BaseSetup is Test {
     // Core helper to issue valid compliance documents
     function _issueValidCompliance(uint256 ownTid) internal {
         vm.prank(insurer);
-        insurance.issuePolicy(ownTid, seller, uint32(block.timestamp + 365 days), 50000, 1000);
+        insurance.issuePolicy(ownTid, uint32(block.timestamp + 365 days), 50000, 1000);
         
         vm.prank(pucCenter);
         puc.issuePUC(ownTid, uint32(block.timestamp + 180 days), 10, 10, 10, true);

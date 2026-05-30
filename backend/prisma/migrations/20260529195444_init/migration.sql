@@ -11,6 +11,9 @@ CREATE TYPE "VehicleStatus" AS ENUM ('NOT_REG', 'ACTIVE', 'SCRAPPED');
 CREATE TYPE "TransferStatus" AS ENUM ('PENDING', 'BUYER_ACCEPTED', 'RTO_APPROVED', 'CANCELLED');
 
 -- CreateEnum
+CREATE TYPE "RegistrationStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+
+-- CreateEnum
 CREATE TYPE "ChallanStatus" AS ENUM ('PENDING', 'PAID', 'CANCELLED');
 
 -- CreateEnum
@@ -28,6 +31,15 @@ CREATE TYPE "OtpPurpose" AS ENUM ('PASSWORD_RESET', 'EMAIL_VERIFY', 'TWO_FACTOR'
 -- CreateEnum
 CREATE TYPE "SyncStatus" AS ENUM ('PENDING', 'MINED', 'FAILED');
 
+-- CreateEnum
+CREATE TYPE "TxActionType" AS ENUM ('B2B_ENTITY_REGISTER', 'B2B_ENTITY_TOGGLE', 'VEHICLE_MINT', 'VEHICLE_SCRAP', 'VEHICLE_ASSIGN_DEALER', 'VEHICLE_REGISTER_RTO', 'TRANSFER_INIT', 'TRANSFER_APPROVE_BUYER', 'TRANSFER_APPROVE_RTO', 'TRANSFER_CANCEL', 'TRADE_CERT_ISSUE', 'TRADE_CERT_REVOKE', 'CHALLAN_ISSUE', 'CHALLAN_PAY', 'CHALLAN_CANCEL', 'INSURANCE_ISSUE', 'INSURANCE_CLAIM', 'INSURANCE_EXPIRE', 'PUC_ISSUE', 'PUC_EXPIRE', 'LOAN_DISBURSE', 'LOAN_CLEAR');
+
+-- CreateEnum
+CREATE TYPE "TxSource" AS ENUM ('MEMBER', 'WEBHOOK', 'SYSTEM');
+
+-- CreateEnum
+CREATE TYPE "SafeProposalStatus" AS ENUM ('PENDING', 'THRESHOLD_MET', 'EXECUTED', 'CANCELLED');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
@@ -36,6 +48,7 @@ CREATE TABLE "users" (
     "email" TEXT,
     "phone" TEXT,
     "isVerified" BOOLEAN NOT NULL DEFAULT false,
+    "rtoEntityId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -68,6 +81,7 @@ CREATE TABLE "b2b_members" (
     "role" "MemberRole" NOT NULL DEFAULT 'OPERATOR',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "lastLoginAt" TIMESTAMP(3),
+    "walletAddress" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -84,7 +98,7 @@ CREATE TABLE "entity_signing_keys" (
     "algorithm" TEXT NOT NULL DEFAULT 'AES-256-GCM',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "rotatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdById" TEXT NOT NULL,
+    "createdById" TEXT,
 
     CONSTRAINT "entity_signing_keys_pkey" PRIMARY KEY ("id")
 );
@@ -132,10 +146,6 @@ CREATE TABLE "vehicle_passports" (
     "dealerUserId" TEXT,
     "scrapEntityId" TEXT,
     "scrapDate" TIMESTAMP(3),
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "createdByMemberId" TEXT,
 
     CONSTRAINT "vehicle_passports_pkey" PRIMARY KEY ("id")
@@ -152,10 +162,6 @@ CREATE TABLE "vehicle_ownerships" (
     "regDate" TIMESTAMP(3) NOT NULL,
     "transferCount" INTEGER NOT NULL DEFAULT 0,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "ownerUserId" TEXT,
     "rtoMemberId" TEXT,
 
@@ -177,16 +183,28 @@ CREATE TABLE "transfer_requests" (
     "sellerOK" BOOLEAN NOT NULL DEFAULT false,
     "buyerOK" BOOLEAN NOT NULL DEFAULT false,
     "rtoOK" BOOLEAN NOT NULL DEFAULT false,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHashInit" TEXT,
-    "txHashResolved" TEXT,
     "sellerUserId" TEXT,
     "buyerUserId" TEXT,
     "rtoApproverMemberId" TEXT,
 
     CONSTRAINT "transfer_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "registration_requests" (
+    "id" TEXT NOT NULL,
+    "dvpId" BIGINT NOT NULL,
+    "passportId" TEXT NOT NULL,
+    "buyerWallet" TEXT NOT NULL,
+    "dealerWallet" TEXT NOT NULL,
+    "buyerUserId" TEXT,
+    "dealerUserId" TEXT,
+    "rtoEntityId" TEXT NOT NULL,
+    "status" "RegistrationStatus" NOT NULL DEFAULT 'PENDING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "registration_requests_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -198,10 +216,6 @@ CREATE TABLE "trade_certs" (
     "issuedAt" TIMESTAMP(3) NOT NULL,
     "validTill" TIMESTAMP(3) NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "createdByMemberId" TEXT,
 
     CONSTRAINT "trade_certs_pkey" PRIMARY KEY ("id")
@@ -221,14 +235,11 @@ CREATE TABLE "challans" (
     "paidAt" TIMESTAMP(3),
     "cancelledAt" TIMESTAMP(3),
     "paidByWallet" TEXT,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHashIssued" TEXT,
-    "txHashResolved" TEXT,
     "createdByMemberId" TEXT,
     "cancelledByMemberId" TEXT,
     "violatorUserId" TEXT,
+    "paymentOrderId" TEXT,
+    "paymentRef" TEXT,
 
     CONSTRAINT "challans_pkey" PRIMARY KEY ("id")
 );
@@ -247,10 +258,6 @@ CREATE TABLE "insurance_policies" (
     "issueDate" TIMESTAMP(3) NOT NULL,
     "expiryDate" TIMESTAMP(3) NOT NULL,
     "ownerWallet" TEXT NOT NULL,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "createdByMemberId" TEXT,
     "ownerUserId" TEXT,
 
@@ -272,10 +279,6 @@ CREATE TABLE "puc_certificates" (
     "issueDate" TIMESTAMP(3) NOT NULL,
     "expiryDate" TIMESTAMP(3) NOT NULL,
     "ownerWallet" TEXT,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "createdByMemberId" TEXT,
     "ownerUserId" TEXT,
 
@@ -298,15 +301,73 @@ CREATE TABLE "loan_records" (
     "nocIssued" BOOLEAN NOT NULL DEFAULT false,
     "nocDate" TIMESTAMP(3),
     "nocRecipientWallet" TEXT,
-    "syncStatus" "SyncStatus" NOT NULL DEFAULT 'PENDING',
-    "blockNumber" BIGINT,
-    "blockTimestamp" TIMESTAMP(3),
-    "txHash" TEXT,
     "createdByMemberId" TEXT,
     "borrowerUserId" TEXT,
     "nocRecipientUserId" TEXT,
 
     CONSTRAINT "loan_records_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "blockchain_transactions" (
+    "id" TEXT NOT NULL,
+    "txHash" TEXT NOT NULL,
+    "actionType" "TxActionType" NOT NULL,
+    "status" "SyncStatus" NOT NULL DEFAULT 'PENDING',
+    "blockNumber" BIGINT,
+    "blockTimestamp" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "b2bEntityId" TEXT,
+    "passportId" TEXT,
+    "ownershipId" TEXT,
+    "transferReqId" TEXT,
+    "tradeCertId" TEXT,
+    "challanId" TEXT,
+    "insuranceId" TEXT,
+    "pucId" TEXT,
+    "loanId" TEXT,
+    "initiatorMemberId" TEXT,
+    "txSource" "TxSource" NOT NULL DEFAULT 'MEMBER',
+    "initiatorUserId" TEXT,
+    "safeProposalId" TEXT,
+
+    CONSTRAINT "blockchain_transactions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "safe_proposals" (
+    "id" TEXT NOT NULL,
+    "safeAddress" TEXT NOT NULL,
+    "safeTxHash" TEXT NOT NULL,
+    "to" TEXT NOT NULL,
+    "calldata" TEXT NOT NULL,
+    "value" TEXT NOT NULL DEFAULT '0',
+    "safeNonce" BIGINT NOT NULL,
+    "description" TEXT NOT NULL,
+    "actionType" "TxActionType" NOT NULL,
+    "status" "SafeProposalStatus" NOT NULL DEFAULT 'PENDING',
+    "threshold" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "executedAt" TIMESTAMP(3),
+    "cancelledAt" TIMESTAMP(3),
+    "proposedById" TEXT NOT NULL,
+    "targetEntityId" TEXT,
+
+    CONSTRAINT "safe_proposals_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "safe_signatures" (
+    "id" TEXT NOT NULL,
+    "proposalId" TEXT NOT NULL,
+    "signerWallet" TEXT NOT NULL,
+    "signature" TEXT NOT NULL,
+    "signedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "memberId" TEXT,
+
+    CONSTRAINT "safe_signatures_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -336,6 +397,9 @@ CREATE INDEX "users_walletAddress_idx" ON "users"("walletAddress");
 CREATE INDEX "users_email_idx" ON "users"("email");
 
 -- CreateIndex
+CREATE INDEX "users_rtoEntityId_idx" ON "users"("rtoEntityId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "b2b_entities_code_key" ON "b2b_entities"("code");
 
 -- CreateIndex
@@ -354,6 +418,9 @@ CREATE INDEX "b2b_entities_onChainId_idx" ON "b2b_entities"("onChainId");
 CREATE UNIQUE INDEX "b2b_members_email_key" ON "b2b_members"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "b2b_members_walletAddress_key" ON "b2b_members"("walletAddress");
+
+-- CreateIndex
 CREATE INDEX "b2b_members_entityId_idx" ON "b2b_members"("entityId");
 
 -- CreateIndex
@@ -361,6 +428,9 @@ CREATE INDEX "b2b_members_email_idx" ON "b2b_members"("email");
 
 -- CreateIndex
 CREATE INDEX "b2b_members_entityId_role_idx" ON "b2b_members"("entityId", "role");
+
+-- CreateIndex
+CREATE INDEX "b2b_members_walletAddress_idx" ON "b2b_members"("walletAddress");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "entity_signing_keys_entityId_key" ON "entity_signing_keys"("entityId");
@@ -411,9 +481,6 @@ CREATE INDEX "vehicle_passports_dealerUserId_idx" ON "vehicle_passports"("dealer
 CREATE INDEX "vehicle_passports_status_idx" ON "vehicle_passports"("status");
 
 -- CreateIndex
-CREATE INDEX "vehicle_passports_syncStatus_idx" ON "vehicle_passports"("syncStatus");
-
--- CreateIndex
 CREATE UNIQUE INDEX "vehicle_ownerships_ownTid_key" ON "vehicle_ownerships"("ownTid");
 
 -- CreateIndex
@@ -433,9 +500,6 @@ CREATE INDEX "vehicle_ownerships_rtoEntityId_idx" ON "vehicle_ownerships"("rtoEn
 
 -- CreateIndex
 CREATE INDEX "vehicle_ownerships_isActive_idx" ON "vehicle_ownerships"("isActive");
-
--- CreateIndex
-CREATE INDEX "vehicle_ownerships_syncStatus_idx" ON "vehicle_ownerships"("syncStatus");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "transfer_requests_reqId_key" ON "transfer_requests"("reqId");
@@ -459,7 +523,16 @@ CREATE INDEX "transfer_requests_buyerUserId_idx" ON "transfer_requests"("buyerUs
 CREATE INDEX "transfer_requests_status_idx" ON "transfer_requests"("status");
 
 -- CreateIndex
-CREATE INDEX "transfer_requests_syncStatus_idx" ON "transfer_requests"("syncStatus");
+CREATE UNIQUE INDEX "registration_requests_passportId_key" ON "registration_requests"("passportId");
+
+-- CreateIndex
+CREATE INDEX "registration_requests_dealerWallet_idx" ON "registration_requests"("dealerWallet");
+
+-- CreateIndex
+CREATE INDEX "registration_requests_rtoEntityId_idx" ON "registration_requests"("rtoEntityId");
+
+-- CreateIndex
+CREATE INDEX "registration_requests_status_idx" ON "registration_requests"("status");
 
 -- CreateIndex
 CREATE INDEX "trade_certs_dealerWallet_idx" ON "trade_certs"("dealerWallet");
@@ -474,10 +547,10 @@ CREATE INDEX "trade_certs_rtoEntityId_idx" ON "trade_certs"("rtoEntityId");
 CREATE INDEX "trade_certs_validTill_idx" ON "trade_certs"("validTill");
 
 -- CreateIndex
-CREATE INDEX "trade_certs_syncStatus_idx" ON "trade_certs"("syncStatus");
+CREATE UNIQUE INDEX "challans_challanId_key" ON "challans"("challanId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "challans_challanId_key" ON "challans"("challanId");
+CREATE UNIQUE INDEX "challans_paymentOrderId_key" ON "challans"("paymentOrderId");
 
 -- CreateIndex
 CREATE INDEX "challans_ownTid_idx" ON "challans"("ownTid");
@@ -493,9 +566,6 @@ CREATE INDEX "challans_status_idx" ON "challans"("status");
 
 -- CreateIndex
 CREATE INDEX "challans_challanId_idx" ON "challans"("challanId");
-
--- CreateIndex
-CREATE INDEX "challans_syncStatus_idx" ON "challans"("syncStatus");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "insurance_policies_polId_key" ON "insurance_policies"("polId");
@@ -516,9 +586,6 @@ CREATE INDEX "insurance_policies_status_idx" ON "insurance_policies"("status");
 CREATE INDEX "insurance_policies_expiryDate_idx" ON "insurance_policies"("expiryDate");
 
 -- CreateIndex
-CREATE INDEX "insurance_policies_syncStatus_idx" ON "insurance_policies"("syncStatus");
-
--- CreateIndex
 CREATE UNIQUE INDEX "puc_certificates_certId_key" ON "puc_certificates"("certId");
 
 -- CreateIndex
@@ -532,9 +599,6 @@ CREATE INDEX "puc_certificates_status_idx" ON "puc_certificates"("status");
 
 -- CreateIndex
 CREATE INDEX "puc_certificates_expiryDate_idx" ON "puc_certificates"("expiryDate");
-
--- CreateIndex
-CREATE INDEX "puc_certificates_syncStatus_idx" ON "puc_certificates"("syncStatus");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "loan_records_loanId_key" ON "loan_records"("loanId");
@@ -552,7 +616,49 @@ CREATE INDEX "loan_records_borrowerUserId_idx" ON "loan_records"("borrowerUserId
 CREATE INDEX "loan_records_status_idx" ON "loan_records"("status");
 
 -- CreateIndex
-CREATE INDEX "loan_records_syncStatus_idx" ON "loan_records"("syncStatus");
+CREATE UNIQUE INDEX "blockchain_transactions_txHash_key" ON "blockchain_transactions"("txHash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "blockchain_transactions_safeProposalId_key" ON "blockchain_transactions"("safeProposalId");
+
+-- CreateIndex
+CREATE INDEX "blockchain_transactions_status_idx" ON "blockchain_transactions"("status");
+
+-- CreateIndex
+CREATE INDEX "blockchain_transactions_actionType_idx" ON "blockchain_transactions"("actionType");
+
+-- CreateIndex
+CREATE INDEX "blockchain_transactions_initiatorMemberId_idx" ON "blockchain_transactions"("initiatorMemberId");
+
+-- CreateIndex
+CREATE INDEX "blockchain_transactions_initiatorUserId_idx" ON "blockchain_transactions"("initiatorUserId");
+
+-- CreateIndex
+CREATE INDEX "blockchain_transactions_safeProposalId_idx" ON "blockchain_transactions"("safeProposalId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "safe_proposals_safeTxHash_key" ON "safe_proposals"("safeTxHash");
+
+-- CreateIndex
+CREATE INDEX "safe_proposals_status_idx" ON "safe_proposals"("status");
+
+-- CreateIndex
+CREATE INDEX "safe_proposals_safeAddress_idx" ON "safe_proposals"("safeAddress");
+
+-- CreateIndex
+CREATE INDEX "safe_proposals_proposedById_idx" ON "safe_proposals"("proposedById");
+
+-- CreateIndex
+CREATE INDEX "safe_proposals_targetEntityId_idx" ON "safe_proposals"("targetEntityId");
+
+-- CreateIndex
+CREATE INDEX "safe_signatures_proposalId_idx" ON "safe_signatures"("proposalId");
+
+-- CreateIndex
+CREATE INDEX "safe_signatures_signerWallet_idx" ON "safe_signatures"("signerWallet");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "safe_signatures_proposalId_signerWallet_key" ON "safe_signatures"("proposalId", "signerWallet");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "indexer_state_contractName_key" ON "indexer_state"("contractName");
@@ -561,25 +667,28 @@ CREATE UNIQUE INDEX "indexer_state_contractName_key" ON "indexer_state"("contrac
 CREATE INDEX "indexer_state_contractName_idx" ON "indexer_state"("contractName");
 
 -- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_rtoEntityId_fkey" FOREIGN KEY ("rtoEntityId") REFERENCES "b2b_entities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "b2b_entities" ADD CONSTRAINT "b2b_entities_registeredByMemberId_fkey" FOREIGN KEY ("registeredByMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "b2b_members" ADD CONSTRAINT "b2b_members_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "b2b_members" ADD CONSTRAINT "b2b_members_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "b2b_entities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "entity_signing_keys" ADD CONSTRAINT "entity_signing_keys_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "entity_signing_keys" ADD CONSTRAINT "entity_signing_keys_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "b2b_entities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "entity_signing_keys" ADD CONSTRAINT "entity_signing_keys_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "b2b_members"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "entity_signing_keys" ADD CONSTRAINT "entity_signing_keys_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "otp_codes" ADD CONSTRAINT "otp_codes_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "b2b_members"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "otp_codes" ADD CONSTRAINT "otp_codes_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "b2b_members"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "b2b_members"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "vehicle_passports" ADD CONSTRAINT "vehicle_passports_mfgEntityId_fkey" FOREIGN KEY ("mfgEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -594,7 +703,7 @@ ALTER TABLE "vehicle_passports" ADD CONSTRAINT "vehicle_passports_dealerUserId_f
 ALTER TABLE "vehicle_passports" ADD CONSTRAINT "vehicle_passports_createdByMemberId_fkey" FOREIGN KEY ("createdByMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "vehicle_ownerships" ADD CONSTRAINT "vehicle_ownerships_passportId_fkey" FOREIGN KEY ("passportId") REFERENCES "vehicle_passports"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "vehicle_ownerships" ADD CONSTRAINT "vehicle_ownerships_passportId_fkey" FOREIGN KEY ("passportId") REFERENCES "vehicle_passports"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "vehicle_ownerships" ADD CONSTRAINT "vehicle_ownerships_rtoEntityId_fkey" FOREIGN KEY ("rtoEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -606,7 +715,7 @@ ALTER TABLE "vehicle_ownerships" ADD CONSTRAINT "vehicle_ownerships_ownerUserId_
 ALTER TABLE "vehicle_ownerships" ADD CONSTRAINT "vehicle_ownerships_rtoMemberId_fkey" FOREIGN KEY ("rtoMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "transfer_requests" ADD CONSTRAINT "transfer_requests_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "transfer_requests" ADD CONSTRAINT "transfer_requests_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "transfer_requests" ADD CONSTRAINT "transfer_requests_rtoEntityId_fkey" FOREIGN KEY ("rtoEntityId") REFERENCES "b2b_entities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -621,6 +730,18 @@ ALTER TABLE "transfer_requests" ADD CONSTRAINT "transfer_requests_buyerUserId_fk
 ALTER TABLE "transfer_requests" ADD CONSTRAINT "transfer_requests_rtoApproverMemberId_fkey" FOREIGN KEY ("rtoApproverMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "registration_requests" ADD CONSTRAINT "registration_requests_passportId_fkey" FOREIGN KEY ("passportId") REFERENCES "vehicle_passports"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "registration_requests" ADD CONSTRAINT "registration_requests_rtoEntityId_fkey" FOREIGN KEY ("rtoEntityId") REFERENCES "b2b_entities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "registration_requests" ADD CONSTRAINT "registration_requests_buyerUserId_fkey" FOREIGN KEY ("buyerUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "registration_requests" ADD CONSTRAINT "registration_requests_dealerUserId_fkey" FOREIGN KEY ("dealerUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "trade_certs" ADD CONSTRAINT "trade_certs_rtoEntityId_fkey" FOREIGN KEY ("rtoEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -630,7 +751,7 @@ ALTER TABLE "trade_certs" ADD CONSTRAINT "trade_certs_dealerUserId_fkey" FOREIGN
 ALTER TABLE "trade_certs" ADD CONSTRAINT "trade_certs_createdByMemberId_fkey" FOREIGN KEY ("createdByMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "challans" ADD CONSTRAINT "challans_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "challans" ADD CONSTRAINT "challans_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "challans" ADD CONSTRAINT "challans_policeEntityId_fkey" FOREIGN KEY ("policeEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -645,7 +766,7 @@ ALTER TABLE "challans" ADD CONSTRAINT "challans_cancelledByMemberId_fkey" FOREIG
 ALTER TABLE "challans" ADD CONSTRAINT "challans_violatorUserId_fkey" FOREIGN KEY ("violatorUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_insEntityId_fkey" FOREIGN KEY ("insEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -657,7 +778,7 @@ ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_createdByMem
 ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_ownerUserId_fkey" FOREIGN KEY ("ownerUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_pucEntityId_fkey" FOREIGN KEY ("pucEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -666,7 +787,10 @@ ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_pucEntityId_fkey
 ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_createdByMemberId_fkey" FOREIGN KEY ("createdByMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "loan_records" ADD CONSTRAINT "loan_records_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "puc_certificates" ADD CONSTRAINT "puc_certificates_ownerUserId_fkey" FOREIGN KEY ("ownerUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "loan_records" ADD CONSTRAINT "loan_records_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "loan_records" ADD CONSTRAINT "loan_records_lenderEntityId_fkey" FOREIGN KEY ("lenderEntityId") REFERENCES "b2b_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -679,3 +803,51 @@ ALTER TABLE "loan_records" ADD CONSTRAINT "loan_records_borrowerUserId_fkey" FOR
 
 -- AddForeignKey
 ALTER TABLE "loan_records" ADD CONSTRAINT "loan_records_nocRecipientUserId_fkey" FOREIGN KEY ("nocRecipientUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_b2bEntityId_fkey" FOREIGN KEY ("b2bEntityId") REFERENCES "b2b_entities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_passportId_fkey" FOREIGN KEY ("passportId") REFERENCES "vehicle_passports"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_ownershipId_fkey" FOREIGN KEY ("ownershipId") REFERENCES "vehicle_ownerships"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_transferReqId_fkey" FOREIGN KEY ("transferReqId") REFERENCES "transfer_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_tradeCertId_fkey" FOREIGN KEY ("tradeCertId") REFERENCES "trade_certs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_challanId_fkey" FOREIGN KEY ("challanId") REFERENCES "challans"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_insuranceId_fkey" FOREIGN KEY ("insuranceId") REFERENCES "insurance_policies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_pucId_fkey" FOREIGN KEY ("pucId") REFERENCES "puc_certificates"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_loanId_fkey" FOREIGN KEY ("loanId") REFERENCES "loan_records"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_initiatorMemberId_fkey" FOREIGN KEY ("initiatorMemberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_initiatorUserId_fkey" FOREIGN KEY ("initiatorUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "blockchain_transactions" ADD CONSTRAINT "blockchain_transactions_safeProposalId_fkey" FOREIGN KEY ("safeProposalId") REFERENCES "safe_proposals"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "safe_proposals" ADD CONSTRAINT "safe_proposals_proposedById_fkey" FOREIGN KEY ("proposedById") REFERENCES "b2b_members"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "safe_proposals" ADD CONSTRAINT "safe_proposals_targetEntityId_fkey" FOREIGN KEY ("targetEntityId") REFERENCES "b2b_entities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "safe_signatures" ADD CONSTRAINT "safe_signatures_proposalId_fkey" FOREIGN KEY ("proposalId") REFERENCES "safe_proposals"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "safe_signatures" ADD CONSTRAINT "safe_signatures_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "b2b_members"("id") ON DELETE SET NULL ON UPDATE CASCADE;

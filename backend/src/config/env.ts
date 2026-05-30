@@ -28,6 +28,9 @@ const envSchema = z.object({
     CONTRACT_PUC_ADDRESS: z.string().min(1, "CONTRACT_PUC_ADDRESS is required"),
     CONTRACT_LOAN_ADDRESS: z.string().min(1, "CONTRACT_LOAN_ADDRESS is required"),
 
+    // Gnosis Safe & Relayer
+    MORTH_GNOSIS_SAFE_ADDRESS: z.string().min(1, "MORTH_GNOSIS_SAFE_ADDRESS is required"),
+
     // Cookie Domain & CORS
     APP_DOMAIN: z.string().default('localhost'),
     ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),

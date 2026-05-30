@@ -7,28 +7,33 @@ import "./IVehicleContracts.sol";
 
 /**
  * @title ChallanContract
- * @dev Manages traffic violations and fines
- * 
+ * @dev Manages traffic violations and fines.
+ *
  * ROLES:
- * - ADMIN_ROLE: Manage police stations and override cancellations
- * - POLICE_ROLE: Issue, pay, and cancel challans
+ * - ADMIN_ROLE:  Manage police stations and override cancellations
+ * - POLICE_ROLE: Issue, pay, and cancel challans (police station wallets)
+ * - SYSTEM_ROLE: Called by DVP during scrapVehicle to cancel orphaned challans
  */
 contract ChallanContract is AccessControl {
     using VehicleLib for address;
     using VehicleLib for uint256;
-    
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN");
+
+    bytes32 public constant ADMIN_ROLE  = keccak256("ADMIN");
     bytes32 public constant POLICE_ROLE = keccak256("POLICE");
+    bytes32 public constant SYSTEM_ROLE = keccak256("SYSTEM");
     
     error PoliceExists();
+    error EntityExists();
     error PoliceNotActive();
     error PoliceNotFound();
     error ChallanNotFound();
     error AlreadyPaid();
     error AlreadyCancelled();
     error Unauthorized();
-    error Overflow();
     error VehicleNotFound();
+    error VehicleNotActive();
+    error ZeroAmountNotAllowed();
+    error OwnershipContractAlreadySet();
     
     struct Police {
         uint64 id;
@@ -58,6 +63,9 @@ contract ChallanContract is AccessControl {
     mapping(uint64 => uint256) private _challanToVehicleIndex;
     mapping(uint256 => uint256) public pendingChallanCount;
 
+    /// @dev O(1) pending amount counter — avoids O(n) loop in getPendingAmount
+    mapping(uint256 => uint128) public pendingAmount;
+
     IOwnershipToken public ownershipContract;
     
     event PoliceReg(uint64 indexed id, string code, address auth);
@@ -65,15 +73,22 @@ contract ChallanContract is AccessControl {
     event ChallanIssued(uint64 indexed challanId, uint256 indexed ownTid, uint64 indexed policeId, uint128 amount);
     event ChallanPaid(uint64 indexed challanId, uint256 indexed ownTid);
     event ChallanCancelled(uint64 indexed challanId, uint256 indexed ownTid, bool isAdminCancel);
+    event AllChallansCancelledOnScrap(uint256 indexed ownTid, uint256 count);
+    event OwnershipContractLinked(address ownershipContract);
     
     constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
     }
 
+    /**
+     * @dev Link OwnershipToken — one-time setter to prevent accidental overwrites.
+     */
     function setOwnershipContract(address _ownContract) external onlyRole(ADMIN_ROLE) {
+        if (address(ownershipContract) != address(0)) revert OwnershipContractAlreadySet();
         _ownContract.validateAddress();
         ownershipContract = IOwnershipToken(_ownContract);
+        emit OwnershipContractLinked(_ownContract);
     }
     
     // ========================================================================
@@ -85,6 +100,7 @@ contract ChallanContract is AccessControl {
      */
     function regPolice(string calldata code, address auth) external onlyRole(ADMIN_ROLE) {
         if (policeCode[code] != 0) revert PoliceExists();
+        if (addrToPolice[auth] != 0) revert EntityExists();
         auth.validateAddress();
         
         _policeCtr++;
@@ -105,9 +121,16 @@ contract ChallanContract is AccessControl {
         uint64 policeId = policeCode[code];
         if (policeId == 0) revert PoliceNotFound();
         
-        police[policeId].active = !police[policeId].active;
+        bool newState = !police[policeId].active;
+        police[policeId].active = newState;
         
-        emit PoliceStatusToggled(policeId, police[policeId].active);
+        if (newState) {
+            _grantRole(POLICE_ROLE, police[policeId].auth);
+        } else {
+            _revokeRole(POLICE_ROLE, police[policeId].auth);
+        }
+        
+        emit PoliceStatusToggled(policeId, newState);
     }
     
     /**
@@ -130,13 +153,14 @@ contract ChallanContract is AccessControl {
         uint256 ownTid,
         uint128 amount
     ) external onlyRole(POLICE_ROLE) returns (uint64) {
-        // Guard against ownTid overflow in bit-packing
-        // ownTid is always uint64 from OwnershipToken, but we enforce this explicitly
-        if (ownTid > type(uint128).max) revert Overflow();
+        // Amount must be positive — zero-amount challans are spam
+        if (amount == 0) revert ZeroAmountNotAllowed();
 
         // Validate the vehicle actually exists and is active
         if (address(ownershipContract) != address(0)) {
-            if (!ownershipContract.exists(ownTid)) revert VehicleNotFound();
+            (bool exists, bool active) = ownershipContract.existsAndIsActive(ownTid);
+            if (!exists) revert VehicleNotFound();
+            if (!active) revert VehicleNotActive();
         }
         
         uint64 policeId = addrToPolice[msg.sender];
@@ -163,63 +187,104 @@ contract ChallanContract is AccessControl {
         uint256 index = challans[ownTid].length - 1;
         _challanToVehicleIndex[challanId] = (ownTid << 128) | index;
         pendingChallanCount[ownTid]++;
+        pendingAmount[ownTid] += amount;
         
         emit ChallanIssued(challanId, ownTid, policeId, amount);
         return challanId;
     }
     
     /**
-     * @dev Pay challan
+     * @dev Pay a challan. ANY active police station can mark a challan as paid.
+     *      This enables real-world interstate payments (e.g. Delhi challan paid at Mumbai).
+     *      cancelChallan still requires the ISSUING station — only they can withdraw their challan.
      */
     function payChallan(uint256 ownTid, uint64 challanId) external onlyRole(POLICE_ROLE) {
         Challan storage ch = _findChallan(ownTid, challanId);
-        
-        if (ch.isPaid) revert AlreadyPaid();
+
+        if (ch.isPaid)      revert AlreadyPaid();
         if (ch.isCancelled) revert AlreadyCancelled();
-        
+
+        // Any active police station can process payment — no station restriction
         uint64 policeId = addrToPolice[msg.sender];
-        if (ch.policeId != policeId) revert Unauthorized();
-        
-        ch.isPaid = true;
+        if (!police[policeId].active) revert PoliceNotActive();
+
+        ch.isPaid   = true;
         ch.paidDate = uint32(block.timestamp);
         if (pendingChallanCount[ownTid] > 0) pendingChallanCount[ownTid]--;
-        
+        if (pendingAmount[ownTid] >= ch.amount) pendingAmount[ownTid] -= ch.amount;
+        else pendingAmount[ownTid] = 0;
+
         emit ChallanPaid(challanId, ownTid);
     }
     
     /**
-     * @dev Cancel challan (police station that issued it)
+     * @dev Cancel a challan. Only the ISSUING police station can cancel their own challans.
+     *      This prevents one station from withdrawing another station's challans.
      */
     function cancelChallan(uint256 ownTid, uint64 challanId) external onlyRole(POLICE_ROLE) {
         Challan storage ch = _findChallan(ownTid, challanId);
-        
-        if (ch.isPaid) revert AlreadyPaid();
+
+        if (ch.isPaid)      revert AlreadyPaid();
         if (ch.isCancelled) revert AlreadyCancelled();
-        
+
+        // Cancellation restricted to the issuing station
         uint64 policeId = addrToPolice[msg.sender];
         if (ch.policeId != policeId) revert Unauthorized();
-        
+
         ch.isCancelled = true;
-        ch.cancelDate = uint32(block.timestamp);
+        ch.cancelDate  = uint32(block.timestamp);
         if (pendingChallanCount[ownTid] > 0) pendingChallanCount[ownTid]--;
-        
+        if (pendingAmount[ownTid] >= ch.amount) pendingAmount[ownTid] -= ch.amount;
+        else pendingAmount[ownTid] = 0;
+
         emit ChallanCancelled(challanId, ownTid, false);
     }
     
     /**
-     * @dev Admin cancel challan (court orders, system errors, appeals)
+     * @dev Admin cancel challan (court orders, system errors, appeals).
+     *      Called via Gnosis Safe multi-sig — no station restriction.
      */
     function adminCancelChallan(uint256 ownTid, uint64 challanId) external onlyRole(ADMIN_ROLE) {
         Challan storage ch = _findChallan(ownTid, challanId);
-        
-        if (ch.isPaid) revert AlreadyPaid();
+
+        if (ch.isPaid)      revert AlreadyPaid();
         if (ch.isCancelled) revert AlreadyCancelled();
-        
+
         ch.isCancelled = true;
-        ch.cancelDate = uint32(block.timestamp);
+        ch.cancelDate  = uint32(block.timestamp);
         if (pendingChallanCount[ownTid] > 0) pendingChallanCount[ownTid]--;
-        
+        if (pendingAmount[ownTid] >= ch.amount) pendingAmount[ownTid] -= ch.amount;
+        else pendingAmount[ownTid] = 0;
+
         emit ChallanCancelled(challanId, ownTid, true);
+    }
+
+    /**
+     * @dev Cancel ALL pending challans for a scrapped vehicle.
+     *      Called by DVP.scrapVehicle() via SYSTEM_ROLE.
+     *      Orphaned challans on scrapped vehicles can never be paid/cancelled normally
+     *      because the vehicle no longer exists. This clears them atomically.
+     */
+    function cancelAllPendingChallans(uint256 ownTid) external onlyRole(SYSTEM_ROLE) {
+        uint256 count = pendingChallanCount[ownTid];
+        if (count == 0) return;
+
+        // Mark all pending challans as cancelled
+        Challan[] storage chList = challans[ownTid];
+        uint256 cancelled = 0;
+        for (uint256 i = 0; i < chList.length; i++) {
+            if (!chList[i].isPaid && !chList[i].isCancelled) {
+                chList[i].isCancelled = true;
+                chList[i].cancelDate  = uint32(block.timestamp);
+                cancelled++;
+            }
+        }
+
+        // Reset O(1) counters
+        pendingChallanCount[ownTid] = 0;
+        pendingAmount[ownTid]       = 0;
+
+        emit AllChallansCancelledOnScrap(ownTid, cancelled);
     }
     
     /**
@@ -251,15 +316,11 @@ contract ChallanContract is AccessControl {
     }
     
     /**
-     * @dev Get total pending challan amount
+     * @dev Get total pending challan amount — O(1) lookup via pendingAmount counter.
+     *      Replaces the previous O(n) loop that could hit gas limits on long histories.
      */
-    function getPendingAmount(uint256 ownTid) external view returns (uint128 total) {
-        Challan[] storage chList = challans[ownTid];
-        for (uint i = 0; i < chList.length; i++) {
-            if (!chList[i].isPaid && !chList[i].isCancelled) {
-                total += chList[i].amount;
-            }
-        }
+    function getPendingAmount(uint256 ownTid) external view returns (uint128) {
+        return pendingAmount[ownTid];
     }
     
     /**

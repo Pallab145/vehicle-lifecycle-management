@@ -8,7 +8,8 @@ const CORE_CONTRACTS = [
     'InsuranceToken',
     'LoanContract',
     'PUCToken',
-    'ChallanContract'
+    'ChallanContract',
+    'Safe'
 ];
 
 const OUT_DIR = path.join(__dirname, 'out');

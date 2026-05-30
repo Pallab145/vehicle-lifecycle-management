@@ -32,7 +32,59 @@
   },
   {
     "type": "function",
+    "name": "MAX_CO",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_HC",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_SMOKE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "PUC_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SYSTEM_ROLE",
     "inputs": [],
     "outputs": [
       {
@@ -499,6 +551,19 @@
   },
   {
     "type": "function",
+    "name": "ownershipContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IOwnershipToken"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pucs",
     "inputs": [
       {
@@ -617,6 +682,19 @@
   },
   {
     "type": "function",
+    "name": "setOwnershipContract",
+    "inputs": [
+      {
+        "name": "_own",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "supportsInterface",
     "inputs": [
       {
@@ -633,6 +711,19 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "terminatePUC",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -693,6 +784,19 @@
   },
   {
     "type": "event",
+    "name": "OwnershipContractLinked",
+    "inputs": [
+      {
+        "name": "ownershipContract",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "PUCExpired",
     "inputs": [
       {
@@ -731,6 +835,25 @@
         "type": "uint32",
         "indexed": false,
         "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PUCTerminated",
+    "inputs": [
+      {
+        "name": "certId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -848,12 +971,22 @@
   },
   {
     "type": "error",
-    "name": "CertExists",
+    "name": "CertNotFound",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "CertNotFound",
+    "name": "EmissionsOutOfBounds",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EntityExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExpiryInPast",
     "inputs": []
   },
   {
@@ -873,7 +1006,22 @@
   },
   {
     "type": "error",
-    "name": "TestFailed",
+    "name": "OwnershipContractAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnershipContractNotSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VehicleNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "VehicleNotFound",
     "inputs": []
   }
 ]

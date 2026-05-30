@@ -89,6 +89,7 @@ export const tokenService = {
             entityId: member.entityId,
             entityType: entity.type,
             role: member.role,
+            wallet: member.walletAddress || undefined,
             iat: now,
             exp: now + env.JWT_ACCESS_TTL,
         };
@@ -189,6 +190,7 @@ export const tokenService = {
                 entityId: session.member.entityId,
                 entityType: session.member.entity.type,
                 role: session.member.role,
+                wallet: session.member.walletAddress || undefined,
                 jti: session.jti,
                 iat: now,
                 exp: now + env.JWT_ACCESS_TTL,

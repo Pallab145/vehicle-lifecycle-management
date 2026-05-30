@@ -1,18 +1,19 @@
 import createError from 'http-errors';
 import { govRepository } from './gov.repository';
 import type { ListGlobalChallansQuery } from './gov.schema';
-import { BlockchainManager } from '@/lib/blockchain.manager';
-import { EntityType, ChallanStatus } from '@/generated/prisma/client';
-import { parseEthersError } from '@/utils/blockchainErrorHandler';
-import { logger } from '@/lib/logger';
+import { adminService } from '@/modules/admin/admin.service';
+import { ChallanStatus, TxActionType } from '@/generated/prisma/client';
+import { ethers } from 'ethers';
+import ChallanAbi from '@/abi/ChallanContract.json';
+import { env } from '@/config/env';
 
 export const govService = {
     /**
-     * Admin overrides and cancels a challan.
+     * Admin overrides and cancels a challan. (Multisig Governance Action)
      */
     async adminCancelChallan(
         challanIdRaw: string,
-        govEntityId: string,
+        _govEntityId: string,
         memberId: string
     ) {
         const challanId = BigInt(challanIdRaw);
@@ -36,29 +37,23 @@ export const govService = {
             throw createError(400, 'Challan record is incomplete (missing ownTid).');
         }
 
-        // 3. Submit to Blockchain
-        let txHash: string;
-        try {
-            txHash = await BlockchainManager.submitGovTx(
-                EntityType.POLICE, // Target the ChallanContract for admin override
-                'ADMIN_CANCEL_CHALLAN',
-                [challan.ownTid, challanId]
-            );
-        } catch (error: unknown) {
-            const parsedError = parseEthersError(error);
-            logger.error({ err: parsedError, challanId: challanIdRaw }, 'Blockchain adminCancelChallan failed');
-            throw createError(400, `Blockchain Error: ${parsedError}`);
-        }
+        // 3. Create Safe Proposal for adminCancelChallan(uint256,uint64)
+        const iface = new ethers.Interface(ChallanAbi);
+        const calldata = iface.encodeFunctionData('adminCancelChallan', [challan.ownTid, challanId]);
 
-        // 4. Create pending transaction
-        await govRepository.createAdminCancelChallanTx({
-            challanId: challan.id,
-            govEntityId,
-            memberId,
-            txHash
+        const proposal = await adminService.createProposal({
+            to: env.CONTRACT_CHALLAN_ADDRESS,
+            calldata,
+            description: `Admin override cancellation of Challan #${challanId} for vehicle ownership #${challan.ownTid}`,
+            actionType: TxActionType.CHALLAN_CANCEL,
+            proposedById: memberId
         });
 
-        return { txHash, status: 'PENDING' };
+        return { 
+            proposalId: proposal.id, 
+            status: proposal.status,
+            message: 'Multisig proposal created for challan cancellation. Signatures required.'
+        };
     },
 
     /**

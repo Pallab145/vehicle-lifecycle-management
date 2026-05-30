@@ -51,6 +51,19 @@
   },
   {
     "type": "function",
+    "name": "SYSTEM_ROLE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "acceptTransfer",
     "inputs": [
       {
@@ -61,70 +74,6 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "activeXfer",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "reqId",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "ownTid",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "rtoId",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "seller",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "buyer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "reqDate",
-        "type": "uint32",
-        "internalType": "uint32"
-      },
-      {
-        "name": "sellerOK",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "buyerOK",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "rtoOK",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "done",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -171,6 +120,39 @@
         "name": "ownTid",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "attachPendingLoan",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bankId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "buyer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "tenure",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
     "outputs": [],
@@ -239,6 +221,37 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deactivateVehicle",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "detachPendingLoan",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bankId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -312,6 +325,121 @@
   },
   {
     "type": "function",
+    "name": "existsAndIsActive",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exists_",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "active_",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getActiveXfer",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OwnershipToken.Xfer",
+        "components": [
+          {
+            "name": "reqId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "ownTid",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "rtoId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "seller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "buyer",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "reqDate",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "sellerOK",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "buyerOK",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "rtoOK",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "done",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "hasPendingLoan",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "pendingBankId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "pendingTenure",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "pendingAmount",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getApproved",
     "inputs": [
       {
@@ -344,6 +472,40 @@
         "name": "",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getVehicleLoanContext",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "isReg",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "hasXfer",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -497,6 +659,44 @@
         "name": "code",
         "type": "string",
         "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isRTORegistered",
+    "inputs": [
+      {
+        "name": "auth",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isRegistered",
+    "inputs": [
+      {
+        "name": "dvpId",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -1047,6 +1247,37 @@
   },
   {
     "type": "event",
+    "name": "ContractsUpdated",
+    "inputs": [
+      {
+        "name": "ins",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "puc",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "loan",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "challan",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RTOReg",
     "inputs": [
       {
@@ -1235,6 +1466,19 @@
   },
   {
     "type": "event",
+    "name": "VehicleDeactivated",
+    "inputs": [
+      {
+        "name": "ownTid",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "VehicleReg",
     "inputs": [
       {
@@ -1391,6 +1635,16 @@
   },
   {
     "type": "error",
+    "name": "BuyerMustBeEOA",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ContractsNotConfigured",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "DealerMismatch",
     "inputs": []
   },
@@ -1504,6 +1758,11 @@
   },
   {
     "type": "error",
+    "name": "EntityExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "FutureTimestampRequired",
     "inputs": []
   },
@@ -1530,6 +1789,21 @@
   {
     "type": "error",
     "name": "InvalidTradeCert",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "LoanAlreadyAttached",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "LoanBorrowerMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "LoanNotFound",
     "inputs": []
   },
   {
@@ -1589,7 +1863,17 @@
   },
   {
     "type": "error",
+    "name": "TradeCertTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "TransferAlreadyPending",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TransferExpired",
     "inputs": []
   },
   {
