@@ -13,7 +13,7 @@ export const CSRF_TOKEN_LENGTH = 32;
 export const CSRF_EXEMPT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export const CSRF_EXEMPT_PATHS = new Set([
-    '/api/auth/login',
+    '/api/auth/institution/login',
     '/api/auth/citizen/login',
     '/api/auth/refresh',
 ]);

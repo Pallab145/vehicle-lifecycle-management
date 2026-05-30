@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { citizenController } from './citizen.controller';
 import { requireAuth } from '@/middlewares/requireAuth';
 import { requireB2C } from '@/middlewares/requireB2C';
+import { requireKyc } from '@/middlewares/requireKyc';
 import { createServiceRateLimit } from '@/middlewares/rate-limit';
 
 const router = Router();
@@ -43,39 +44,39 @@ router.get('/me', citizenController.getMe);
 /**
  * @route   GET /api/citizens/vehicles
  * @desc    Get all vehicles owned by the authenticated citizen
- * @access  Private (Citizen)
+ * @access  Private (Citizen, KYC Required)
  */
-router.get('/vehicles', citizenController.getMyVehicles);
+router.get('/vehicles', requireKyc, citizenController.getMyVehicles);
 
 /**
  * @route   GET /api/citizens/vehicles/:ownTid
  * @desc    Get full details for a single vehicle owned by the citizen
- * @access  Private (Citizen)
+ * @access  Private (Citizen, KYC Required)
  */
-router.get('/vehicles/:ownTid', citizenController.getVehicleDetail);
+router.get('/vehicles/:ownTid', requireKyc, citizenController.getVehicleDetail);
 
 /**
  * @route   GET /api/citizens/vehicles/by-dvp/:dvpId/scrap/eligibility
  * @desc    Pre-flight check for scrapping a vehicle (keyed by DVP token ID)
- * @access  Private (Citizen)
+ * @access  Private (Citizen, KYC Required)
  *
  * IMPORTANT: Uses 'by-dvp' prefix to avoid Express route conflict with /vehicles/:ownTid.
  * authorizeScrap(tokenId, scrapCenterCode) in the DVP contract takes the DVP token ID.
  */
-router.get('/vehicles/by-dvp/:dvpId/scrap/eligibility', citizenController.checkScrapEligibility);
+router.get('/vehicles/by-dvp/:dvpId/scrap/eligibility', requireKyc, citizenController.checkScrapEligibility);
 
 /**
  * @route   GET /api/citizens/vehicles/:ownTid/transfer/eligibility
  * @desc    Pre-flight check for transferring a vehicle
- * @access  Private (Citizen)
+ * @access  Private (Citizen, KYC Required)
  */
-router.get('/vehicles/:ownTid/transfer/eligibility', citizenController.checkTransferEligibility);
+router.get('/vehicles/:ownTid/transfer/eligibility', requireKyc, citizenController.checkTransferEligibility);
 
 /**
  * @route   GET /api/citizens/vehicles/:ownTid/transfer/status
  * @desc    Get the status of a pending transfer for a specific vehicle (for buyer/seller)
- * @access  Private (Citizen)
+ * @access  Private (Citizen, KYC Required)
  */
-router.get('/vehicles/:ownTid/transfer/status', citizenController.getTransferStatus);
+router.get('/vehicles/:ownTid/transfer/status', requireKyc, citizenController.getTransferStatus);
 
 export { router as citizenRoutes };

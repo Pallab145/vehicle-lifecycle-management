@@ -45,10 +45,20 @@ export const authService = {
 
         const tokens = await tokenService.issueTokenPairInstitution(member, member.entity, req, res);
         
-        // Return member without passwordHash
-        const { passwordHash, ...safeMember } = member;
-        
-        return { user: safeMember, tokens };
+        // Return cleanly formatted user object, omitting passwordHash and BigInt fields
+        const safeUser = {
+            id: member.id,
+            email: member.email,
+            name: member.name,
+            role: member.role,
+            entityId: member.entityId,
+            entityType: member.entity.type,
+            walletAddress: member.walletAddress,
+            isActive: member.isActive,
+            lastLoginAt: member.lastLoginAt?.toISOString() || null
+        };
+
+        return { user: safeUser, tokens };
     },
 
     async requestPasswordReset(email: string) {
