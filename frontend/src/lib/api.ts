@@ -1,12 +1,33 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import type { AuthUser } from '@/types/auth';
+import type {
+    B2BEntityDetail, CreateB2BEntityPayload,
+    B2BMember, CreateMemberPayload, MemberRole,
+    MfgVehicle, ManufactureVehiclePayload, AssignToDealerPayload,
+    RtoRegistration, RtoTransfer, RtoTradeCert,
+    IssueTradeCertPayload, RegisterVehiclePayload,
+    PoliceChallan, IssueChallanPayload,
+    InsurancePolicyRecord, IssuePolicyPayload,
+    PucCertificateRecord, IssuePucPayload,
+    BankLoanRecord, RegisterLoanPayload, RefinanceLoanPayload,
+    ScrapVehicleRecord, ScrapEligibility,
+    GlobalChallan,
+    SafeInfo, SafeProposal, SafeSignature,
+    DealerInventoryItem, DealerTradeCert, CreateSaleRequestPayload,
+    PaymentOrder, CitizenChallanForPayment,
+    BlockchainTransaction,
+    EntityType, VehicleStatus, TransferStatus, RegistrationStatus,
+    ChallanStatus, InsuranceStatus, LoanStatus, PucStatus, SafeProposalStatus,
+    SystemAnalytics
+} from '@/types/b2b';
 import type { 
     B2BEntity, 
     CitizenProfile,
     VehicleOwnership, 
     ScrapEligibilityResult, 
     TransferEligibilityResult,
-    TransferRequest
+    TransferRequest,
+    TimelineEvent
 } from '@/types/citizen';
 
 // ── Custom Error Class ──
@@ -56,7 +77,7 @@ export const apiClient = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
-    timeout: 10_000,
+    timeout: 30_000,
 });
 
 // Explicitly attach CSRF token for double-submit cookie pattern
@@ -154,6 +175,8 @@ export const authApi = {
         apiClient.get<{ success: true; nonce: string; }>(`/auth/citizen/nonce`).then(res => res.data),
     loginCitizen: (walletAddress: string, message: string, signature: string) =>
         apiClient.post<{ success: true; user: AuthUser }>('/auth/citizen/login', { walletAddress, message, signature }).then(res => res.data),
+    loginCitizenAadhaar: (vehicleId: string, documentNumber: string) =>
+        apiClient.post<{ success: true; user: AuthUser }>('/auth/citizen/login-aadhaar', { vehicleId, documentNumber }).then(res => res.data),
 
     // B2B (Institution - Web2)
     loginInstitution: (email: string, password: string) =>
@@ -198,4 +221,186 @@ export const citizenApi = {
         apiClient.get<{ success: true; eligibility: TransferEligibilityResult }>(`/citizens/vehicles/${ownTid}/transfer/eligibility`).then(res => res.data),
     getTransferStatus: (ownTid: string) =>
         apiClient.get<{ success: true; transfer: TransferRequest }>(`/citizens/vehicles/${ownTid}/transfer/status`).then(res => res.data),
+    getIncomingTransfers: () =>
+        apiClient.get<{ success: true; transfers: TransferRequest[] }>('/citizens/transfers/incoming').then(res => res.data),
+    getVehicleTimeline: (ownTid: string) =>
+        apiClient.get<{ success: true; timeline: TimelineEvent[] }>(`/citizens/vehicles/${ownTid}/timeline`).then(res => res.data),
+};
+
+// ── Institution (B2B Entity) APIs ──
+export const institutionApi = {
+    create: (payload: CreateB2BEntityPayload) =>
+        apiClient.post<{ success: true; entity: B2BEntityDetail; message: string }>('/institutions', payload).then(res => res.data),
+    list: (params?: { page?: number; limit?: number; type?: EntityType; search?: string; isActive?: boolean }) =>
+        apiClient.get<{ success: true; entities: B2BEntityDetail[]; total: number; page: number; limit: number }>('/institutions', { params }).then(res => res.data),
+    getById: (id: string) =>
+        apiClient.get<{ success: true; entity: B2BEntityDetail }>(`/institutions/${id}`).then(res => res.data),
+    toggle: (id: string, isActive: boolean) =>
+        apiClient.patch<{ success: true; entity: B2BEntityDetail; message: string }>(`/institutions/${id}/toggle`, { isActive }).then(res => res.data),
+    retryRegistration: (id: string) =>
+        apiClient.post<{ success: true; message: string }>(`/institutions/${id}/retry`).then(res => res.data),
+};
+
+// ── Staff (B2B Member) APIs ──
+export const staffApi = {
+    list: (params?: { page?: number; limit?: number; search?: string; role?: MemberRole; isActive?: boolean }) =>
+        apiClient.get<{ success: true; members: B2BMember[]; total: number; page: number; limit: number }>('/staff', { params }).then(res => res.data),
+    getById: (id: string) =>
+        apiClient.get<{ success: true; member: B2BMember }>(`/staff/${id}`).then(res => res.data),
+    create: (payload: CreateMemberPayload) =>
+        apiClient.post<{ success: true; member: B2BMember; tempPassword: string; message: string }>('/staff', payload).then(res => res.data),
+    updateRole: (id: string, role: MemberRole) =>
+        apiClient.patch<{ success: true; member: B2BMember }>(`/staff/${id}/role`, { role }).then(res => res.data),
+    updateStatus: (id: string, isActive: boolean) =>
+        apiClient.patch<{ success: true; member: B2BMember }>(`/staff/${id}/status`, { isActive }).then(res => res.data),
+    forceResetPassword: (id: string) =>
+        apiClient.post<{ success: true; member: B2BMember; tempPassword: string; message: string }>(`/staff/${id}/reset-password`).then(res => res.data),
+    changePassword: (payload: { oldPassword: string; newPassword: string }) =>
+        apiClient.patch<{ success: true; message: string }>('/staff/me/password', payload).then(res => res.data),
+};
+
+// ── Manufacturer APIs ──
+export const mfgApi = {
+    listVehicles: (params?: { page?: number; limit?: number; status?: VehicleStatus }) =>
+        apiClient.get<{ success: true; vehicles: MfgVehicle[]; total: number; page: number; limit: number }>('/mfg/vehicles', { params }).then(res => res.data),
+    manufacture: (payload: ManufactureVehiclePayload) =>
+        apiClient.post<{ success: true; vehicle: MfgVehicle; message: string }>('/mfg/vehicles/manufacture', payload).then(res => res.data),
+    assignToDealer: (tokenId: string, payload: AssignToDealerPayload) =>
+        apiClient.post<{ success: true; message: string }>(`/mfg/vehicles/${tokenId}/assign`, payload).then(res => res.data),
+};
+
+// ── RTO APIs ──
+export const rtoApi = {
+    // Write Operations
+    issueTradeCert: (payload: IssueTradeCertPayload) =>
+        apiClient.post<{ success: true; tradeCert: RtoTradeCert; message: string }>('/rto/trade-certs/issue', payload).then(res => res.data),
+    revokeTradeCert: (dealerWallet: string) =>
+        apiClient.post<{ success: true; message: string }>(`/rto/trade-certs/revoke/${dealerWallet}`).then(res => res.data),
+    registerVehicle: (payload: RegisterVehiclePayload) =>
+        apiClient.post<{ success: true; message: string }>('/rto/vehicles/register', payload).then(res => res.data),
+    approveTransfer: (ownTid: string) =>
+        apiClient.post<{ success: true; message: string }>(`/rto/transfers/${ownTid}/approve`).then(res => res.data),
+    // Read Operations
+    listTradeCerts: (params?: { page?: number; limit?: number; isActive?: string }) =>
+        apiClient.get<{ success: true; tradeCerts: RtoTradeCert[]; total: number; page: number; limit: number }>('/rto/trade-certs', { params }).then(res => res.data),
+    listRegistrations: (params?: { page?: number; limit?: number; status?: RegistrationStatus }) =>
+        apiClient.get<{ success: true; registrations: RtoRegistration[]; total: number; page: number; limit: number }>('/rto/vehicles/registrations', { params }).then(res => res.data),
+    listTransfers: (params?: { page?: number; limit?: number; status?: TransferStatus }) =>
+        apiClient.get<{ success: true; transfers: RtoTransfer[]; total: number; page: number; limit: number }>('/rto/transfers', { params }).then(res => res.data),
+};
+
+// ── Police APIs ──
+export const policeApi = {
+    issueChallan: (payload: IssueChallanPayload) =>
+        apiClient.post<{ success: true; challan: PoliceChallan; message: string }>('/police/challans/issue', payload).then(res => res.data),
+    cancelChallan: (challanId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/police/challans/${challanId}/cancel`).then(res => res.data),
+    markPaid: (challanId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/police/challans/${challanId}/mark-paid`).then(res => res.data),
+    listChallans: (params?: { page?: number; limit?: number; status?: ChallanStatus }) =>
+        apiClient.get<{ success: true; challans: PoliceChallan[]; total: number; page: number; limit: number }>('/police/challans', { params }).then(res => res.data),
+};
+
+// ── Bank APIs ──
+export const bankApi = {
+    registerLoan: (payload: RegisterLoanPayload) =>
+        apiClient.post<{ success: true; loan: BankLoanRecord; message: string }>('/bank/loans', payload).then(res => res.data),
+    issueNoc: (loanId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/bank/loans/${loanId}/noc`).then(res => res.data),
+    cancelPendingLoan: (dvpId: string) =>
+        apiClient.delete<{ success: true; message: string }>(`/bank/loans/pending/${dvpId}`).then(res => res.data),
+    refinanceLoan: (loanId: string, payload: RefinanceLoanPayload) =>
+        apiClient.post<{ success: true; message: string }>(`/bank/loans/${loanId}/refinance`, payload).then(res => res.data),
+    listLoans: (params?: { page?: number; limit?: number; status?: LoanStatus; nocIssued?: boolean; dvpId?: string }) =>
+        apiClient.get<{ success: true; loans: BankLoanRecord[]; total: number; page: number; limit: number }>('/bank/loans', { params }).then(res => res.data),
+    getLoanDetails: (loanId: string) =>
+        apiClient.get<{ success: true; loan: BankLoanRecord }>(`/bank/loans/${loanId}`).then(res => res.data),
+};
+
+// ── Insurance APIs ──
+export const insuranceApi = {
+    issuePolicy: (payload: IssuePolicyPayload) =>
+        apiClient.post<{ success: true; policy: InsurancePolicyRecord; message: string }>('/insurance/policies', payload).then(res => res.data),
+    markExpired: (polId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/insurance/policies/${polId}/expire`).then(res => res.data),
+    fileClaim: (polId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/insurance/policies/${polId}/claims`).then(res => res.data),
+    listPolicies: (params?: { page?: number; limit?: number; status?: InsuranceStatus; ownTid?: string }) =>
+        apiClient.get<{ success: true; policies: InsurancePolicyRecord[]; total: number; page: number; limit: number }>('/insurance/policies', { params }).then(res => res.data),
+    getVehiclePolicy: (ownTid: string) =>
+        apiClient.get<{ success: true; policy: InsurancePolicyRecord }>(`/insurance/vehicle/${ownTid}/policy`).then(res => res.data),
+    getPolicyDetails: (polId: string) =>
+        apiClient.get<{ success: true; policy: InsurancePolicyRecord }>(`/insurance/policies/${polId}`).then(res => res.data),
+};
+
+// ── PUC APIs ──
+export const pucApi = {
+    issuePuc: (payload: IssuePucPayload) =>
+        apiClient.post<{ success: true; certificate: PucCertificateRecord; message: string }>('/puc/certificates', payload).then(res => res.data),
+    markExpired: (certId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/puc/certificates/${certId}/expire`).then(res => res.data),
+    listCertificates: (params?: { page?: number; limit?: number; status?: PucStatus }) =>
+        apiClient.get<{ success: true; certificates: PucCertificateRecord[]; total: number; page: number; limit: number }>('/puc/certificates', { params }).then(res => res.data),
+    getVehicleCertificate: (ownTid: string) =>
+        apiClient.get<{ success: true; certificate: PucCertificateRecord }>(`/puc/vehicle/${ownTid}/certificate`).then(res => res.data),
+    getCertificateDetails: (certId: string) =>
+        apiClient.get<{ success: true; certificate: PucCertificateRecord }>(`/puc/certificates/${certId}`).then(res => res.data),
+};
+
+// ── Scrap Center APIs ──
+export const scrapApi = {
+    scrapVehicle: (dvpId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/scrap/vehicles/${dvpId}/scrap`).then(res => res.data),
+    checkEligibility: (dvpId: string) =>
+        apiClient.get<{ success: true; eligibility: ScrapEligibility }>(`/scrap/vehicles/${dvpId}/eligibility`).then(res => res.data),
+    listScrappedVehicles: (params?: { page?: number; limit?: number }) =>
+        apiClient.get<{ success: true; vehicles: ScrapVehicleRecord[]; total: number; page: number; limit: number }>('/scrap/vehicles', { params }).then(res => res.data),
+    getVehicleDetails: (dvpId: string) =>
+        apiClient.get<{ success: true; vehicle: ScrapVehicleRecord }>(`/scrap/vehicles/${dvpId}`).then(res => res.data),
+};
+
+// ── Government APIs ──
+export const govApi = {
+    listGlobalChallans: (params?: { page?: number; limit?: number; status?: ChallanStatus }) =>
+        apiClient.get<{ success: true; challans: GlobalChallan[]; total: number; page: number; limit: number }>('/gov/challans', { params }).then(res => res.data),
+    adminCancelChallan: (challanId: string) =>
+        apiClient.post<{ success: true; message: string }>(`/gov/challans/${challanId}/cancel`).then(res => res.data),
+    getSystemAnalytics: () =>
+        apiClient.get<{ success: true; analytics: SystemAnalytics }>('/gov/analytics').then(res => res.data),
+    getAuditLogs: (params?: { page?: number; limit?: number }) =>
+        apiClient.get<{ success: true; data: TimelineEvent[]; total: number; page: number; limit: number; totalPages: number }>('/gov/audit-logs', { params }).then(res => res.data),
+};
+
+// ── Admin / Safe Governance APIs ──
+export const adminApi = {
+    getSafeInfo: () =>
+        apiClient.get<{ success: true; safeInfo: SafeInfo }>('/admin/safe/info').then(res => res.data),
+    listProposals: (params?: { page?: number; limit?: number; status?: SafeProposalStatus }) =>
+        apiClient.get<{ success: true; proposals: SafeProposal[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>('/admin/proposals', { params }).then(res => res.data),
+    getProposal: (id: string) =>
+        apiClient.get<{ success: true; proposal: SafeProposal }>(`/admin/proposals/${id}`).then(res => res.data),
+    cancelProposal: (id: string) =>
+        apiClient.delete<{ success: true; proposal: SafeProposal; message: string }>(`/admin/proposals/${id}`).then(res => res.data),
+    signProposal: (id: string, signature: string) =>
+        apiClient.post<{ success: true; signature: SafeSignature; message: string }>(`/admin/proposals/${id}/sign`, { signature }).then(res => res.data),
+    executeProposal: (id: string) =>
+        apiClient.post<{ success: true; message: string }>(`/admin/proposals/${id}/execute`).then(res => res.data),
+};
+
+// ── Dealer APIs (Citizen-Dealer) ──
+export const dealerApi = {
+    listInventory: () =>
+        apiClient.get<{ success: true; vehicles: DealerInventoryItem[] }>('/dealer/inventory').then(res => res.data),
+    listTradeCerts: () =>
+        apiClient.get<{ success: true; tradeCerts: DealerTradeCert[] }>('/dealer/trade-certs').then(res => res.data),
+    createSaleRequest: (payload: CreateSaleRequestPayload) =>
+        apiClient.post<{ success: true; message: string }>('/dealer/sale-requests', payload).then(res => res.data),
+};
+
+// ── Payment APIs ──
+export const paymentApi = {
+    initiateChallanPayment: (challanId: string, paymentMethod?: 'UPI' | 'CARD' | 'NET_BANKING' | 'WALLET') =>
+        apiClient.post<{ success: true; order: PaymentOrder }>(`/payment/challans/${challanId}/initiate`, { paymentMethod }).then(res => res.data),
+    listCitizenChallans: (params?: { page?: number; limit?: number; status?: ChallanStatus }) =>
+        apiClient.get<{ success: true; challans: CitizenChallanForPayment[]; total: number; page: number; limit: number }>('/payment/challans', { params }).then(res => res.data),
 };

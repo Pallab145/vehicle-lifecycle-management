@@ -29,3 +29,9 @@ export const LoginCitizenSchema = z.object({
     signature: z.string().min(1, 'Signature is required'),
 });
 export type LoginCitizenInput = z.infer<typeof LoginCitizenSchema>;
+
+export const LoginCitizenAadhaarSchema = z.object({
+    vehicleId: z.string().min(1, 'Vehicle ID is required'),
+    documentNumber: z.string().min(1, 'Aadhaar / Gov ID is required'),
+});
+export type LoginCitizenAadhaarInput = z.infer<typeof LoginCitizenAadhaarSchema>;

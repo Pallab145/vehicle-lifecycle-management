@@ -1,55 +1,30 @@
-import Link from 'next/link';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Web3LoginButton } from '@/components/auth/Web3LoginButton';
-import { Button } from '@/components/ui/button';
-import { Shield, Users } from 'lucide-react';
+import { HeroSection } from '@/components/landing/HeroSection';
+import { PortalsSection } from '@/components/landing/PortalsSection';
+import { FeaturesSection } from '@/components/landing/FeaturesSection';
+import { InstitutionsGrid } from '@/components/landing/InstitutionsGrid';
+import { Footer } from '@/components/landing/Footer';
+
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default function Home() {
   return (
-    <main className="flex-1 flex flex-col items-center justify-center bg-muted/40 p-6 min-h-screen">
-      <div className="w-full max-w-4xl text-center space-y-8 mb-12">
-        <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-foreground">
-          Vehicle Lifecycle Management
-        </h1>
-        <p className="text-xl text-muted-foreground">
-          Secure, transparent, and decentralized vehicle tracking on the blockchain.
-        </p>
+    <main className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden">
+      {/* Premium Background Glows */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 blur-[120px] rounded-full pointer-events-none -z-10 animate-pulse duration-[10000ms]" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/15 blur-[120px] rounded-full pointer-events-none -z-10 animate-pulse duration-[8000ms]" />
+      
+      <div className="absolute top-6 right-6 z-50">
+        <ThemeToggle />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8 w-full max-w-4xl">
-        <Card className="hover:border-primary/50 transition-colors">
-          <CardHeader>
-            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-              <Users className="text-primary w-6 h-6" />
-            </div>
-            <CardTitle>Citizen Portal</CardTitle>
-            <CardDescription>
-              For vehicle owners. Connect your Web3 wallet to manage your vehicles, transfer ownership, and view history.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Web3LoginButton />
-          </CardContent>
-        </Card>
-
-        <Card className="hover:border-primary/50 transition-colors">
-          <CardHeader>
-            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-              <Shield className="text-primary w-6 h-6" />
-            </div>
-            <CardTitle>Institutional Portal</CardTitle>
-            <CardDescription>
-              For RTOs, Police, Manufacturers, and other authorized entities managing the lifecycle network.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link href="/institutions/login" className="w-full block">
-              <Button variant="outline" className="w-full">
-                Enter Institutional Portal
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+      <div className="flex-grow z-10">
+        <HeroSection />
+        <PortalsSection />
+        <FeaturesSection />
+        <InstitutionsGrid />
+      </div>
+      <div className="z-10">
+        <Footer />
       </div>
     </main>
   );

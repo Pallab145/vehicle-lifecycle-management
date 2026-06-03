@@ -12,8 +12,8 @@ export async function initializeWorkers() {
         await import('@/modules/email/jobs/email.processor');
 
         // Start Blockchain Indexer Daemon
-        const { indexerService } = await import('@/modules/indexer/indexer.service');
-        await indexerService.start();
+        // const { indexerService } = await import('@/modules/indexer/indexer.service');
+        // await indexerService.start();
 
         // Start Blockchain Reconciliation Worker
         await import('@/jobs/reconciliation.worker');

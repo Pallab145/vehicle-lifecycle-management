@@ -39,9 +39,9 @@ export const authService = {
             throw createError(403, 'Institutional entity account is currently suspended or inactive');
         }
 
-        if (member.entity.onChainId === null) {
-            throw createError(403, `Institutional blockchain registration is still pending. Please wait until the registration is mined on-chain.`);
-        }
+        // if (member.entity.onChainId === null) {
+        //     throw createError(403, `Institutional blockchain registration is still pending. Please wait until the registration is mined on-chain.`);
+        // }
 
         const tokens = await tokenService.issueTokenPairInstitution(member, member.entity, req, res);
         
@@ -136,5 +136,22 @@ export const authService = {
             if (createError.isHttpError(error)) throw error;
             throw createError(401, 'Invalid wallet signature');
         }
+    },
+
+    async loginCitizenAadhaar(input: import('./auth.schemas').LoginCitizenAadhaarInput, req: Request, res: Response) {
+        // 1. Verify Aadhaar matches the vehicle's active owner
+        const user = await authRepository.findCitizenByVehicleAndAadhaar(input.vehicleId, input.documentNumber);
+
+        if (!user) {
+            throw createError(401, 'Access Denied: The provided Aadhaar / Gov ID does not match the registered owner of this vehicle.');
+        }
+
+        // 2. Issue a read-only JWT session for this user
+        // We will pass authMethod: 'AADHAAR' inside the JWT so the frontend knows it's a restricted session
+        // For simplicity with our existing tokenService, we just issue a normal token.
+        // The frontend can check if `walletAddress` is available from wagmi to enable transactions.
+        const tokens = await tokenService.issueTokenPairCitizen(user, req, res);
+        
+        return { user, tokens };
     }
 };

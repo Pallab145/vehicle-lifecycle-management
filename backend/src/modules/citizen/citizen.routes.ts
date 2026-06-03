@@ -56,6 +56,13 @@ router.get('/vehicles', requireKyc, citizenController.getMyVehicles);
 router.get('/vehicles/:ownTid', requireKyc, citizenController.getVehicleDetail);
 
 /**
+ * @route   GET /api/citizens/vehicles/:ownTid/timeline
+ * @desc    Get full lifecycle history timeline for a vehicle
+ * @access  Private (Citizen, KYC Required)
+ */
+router.get('/vehicles/:ownTid/timeline', requireKyc, citizenController.getVehicleTimeline);
+
+/**
  * @route   GET /api/citizens/vehicles/by-dvp/:dvpId/scrap/eligibility
  * @desc    Pre-flight check for scrapping a vehicle (keyed by DVP token ID)
  * @access  Private (Citizen, KYC Required)
@@ -78,5 +85,12 @@ router.get('/vehicles/:ownTid/transfer/eligibility', requireKyc, citizenControll
  * @access  Private (Citizen, KYC Required)
  */
 router.get('/vehicles/:ownTid/transfer/status', requireKyc, citizenController.getTransferStatus);
+
+/**
+ * @route   GET /api/citizens/transfers/incoming
+ * @desc    Get all incoming transfer requests (where the citizen is the buyer)
+ * @access  Private (Citizen, KYC Required)
+ */
+router.get('/transfers/incoming', requireKyc, citizenController.getIncomingTransfers);
 
 export { router as citizenRoutes };

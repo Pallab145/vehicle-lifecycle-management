@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import type { AuthUser } from '@/types/auth';
 
@@ -39,15 +40,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         staleTime: 1000 * 60 * 5, // 5 minutes
     });
 
+    const router = useRouter();
+
     const logout = async () => {
         try {
             await authApi.logout();
         } catch (e) {
             console.error('Logout failed', e);
         } finally {
-            // Clear all react-query cache and reset user to null immediately
-            queryClient.clear();
-            await refetch();
+            // Hard redirect to landing page to completely clear React state and prevent 
+            // RequireAuth from intercepting the null user state and sending us to /login.
+            window.location.href = '/';
         }
     };
 
@@ -57,7 +60,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         error: error as Error | null,
         refetchUser: async () => { await refetch(); },
         logout,
-    }), [data, isLoading, error, refetch, queryClient]);
+    }), [data, isLoading, error, refetch, queryClient, router]);
 
     return (
         <UserContext.Provider value={value}>

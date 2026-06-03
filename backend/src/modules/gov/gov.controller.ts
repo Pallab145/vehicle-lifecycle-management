@@ -32,5 +32,30 @@ export const govController = {
             success: true,
             data: result
         });
+    }),
+
+    /**
+     * Retrieves system-wide analytics for the MoRTH dashboard.
+     */
+    getSystemAnalytics: asyncHandler(async (req: Request, res: Response) => {
+        const result = await govService.getSystemAnalytics();
+        res.status(200).json({
+            success: true,
+            analytics: result
+        });
+    }),
+
+    /**
+     * Retrieves system-wide audit logs.
+     */
+    getGlobalAuditLogs: asyncHandler(async (req: Request, res: Response) => {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        
+        const result = await govService.getGlobalAuditLogs(limit, page);
+        res.status(200).json({
+            success: true,
+            ...result
+        });
     })
 };

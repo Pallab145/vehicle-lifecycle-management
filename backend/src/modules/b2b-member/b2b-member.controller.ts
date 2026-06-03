@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '@/utils/asyncHandler';
 import { b2bMemberService } from './b2b-member.service';
-import { createMemberSchema, updateMemberRoleSchema, updateMemberStatusSchema, memberQuerySchema } from './b2b-member.schema';
+import { createMemberSchema, updateMemberRoleSchema, updateMemberStatusSchema, memberQuerySchema, ChangePasswordSchema } from './b2b-member.schema';
 
 export const b2bMemberController = {
     createMember: asyncHandler(async (req: Request, res: Response) => {
@@ -21,7 +21,11 @@ export const b2bMemberController = {
 
         res.status(200).json({
             success: true,
-            members: result
+            members: result.data,
+            total: result.meta.total,
+            page: result.meta.page,
+            limit: result.meta.limit,
+            totalPages: result.meta.totalPages
         });
     }),
 
@@ -58,6 +62,28 @@ export const b2bMemberController = {
             success: true,
             message: `Member successfully ${isActive ? 'activated' : 'deactivated'}.`,
             member: member
+        });
+    }),
+
+    resetMemberPassword: asyncHandler(async (req: Request, res: Response) => {
+        const { id } = req.params as { id: string };
+        const result = await b2bMemberService.forceResetPassword(id, req.caller!);
+
+        res.status(200).json({
+            success: true,
+            message: 'Password successfully reset.',
+            member: result.member,
+            tempPassword: result.tempPassword
+        });
+    }),
+
+    changePassword: asyncHandler(async (req: Request, res: Response) => {
+        const input = ChangePasswordSchema.parse(req.body);
+        await b2bMemberService.changePassword(input, req.caller!);
+
+        res.status(200).json({
+            success: true,
+            message: 'Password successfully changed.'
         });
     })
 };

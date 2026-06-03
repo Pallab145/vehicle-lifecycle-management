@@ -42,7 +42,10 @@ export const b2bEntityController = {
 
         res.status(200).json({
             success: true,
-            entities: result
+            entities: result.items,
+            total: result.total,
+            page: result.page,
+            limit: result.limit
         });
     }),
 

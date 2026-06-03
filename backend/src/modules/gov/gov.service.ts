@@ -69,5 +69,19 @@ export const govService = {
             ownTid: query.ownTid ? BigInt(query.ownTid) : undefined,
             challanId: query.challanId ? BigInt(query.challanId) : undefined
         });
+    },
+
+    /**
+     * Retrieves system-wide analytics for the MoRTH dashboard.
+     */
+    async getSystemAnalytics() {
+        return govRepository.getSystemAnalytics();
+    },
+
+    /**
+     * Retrieves system-wide audit logs.
+     */
+    async getGlobalAuditLogs(limit?: number, page?: number) {
+        return govRepository.getGlobalAuditLogs(limit, page);
     }
 };

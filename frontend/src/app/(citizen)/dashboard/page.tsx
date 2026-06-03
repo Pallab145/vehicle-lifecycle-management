@@ -76,41 +76,46 @@ export default function CitizenDashboardPage() {
             const statusColor = ownership.status === 'ACTIVE' ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500';
 
             return (
-              <Card key={ownership.ownTid} className="flex flex-col">
-                <CardHeader className="pb-3">
+              <Card key={ownership.ownTid} className="flex flex-col relative overflow-hidden bg-background/40 backdrop-blur-md border-border/50 hover:border-primary/50 hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 group hover:-translate-y-1">
+                {/* Decorative background gradient */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/10 via-primary/5 to-transparent rounded-bl-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10" />
+
+                <CardHeader className="pb-3 relative z-10">
                   <div className="flex justify-between items-start">
                     <div>
-                      <CardTitle className="text-xl">{vehicle.make} {vehicle.model}</CardTitle>
-                      <CardDescription>{vehicle.registrationNumber}</CardDescription>
+                      <CardTitle className="text-xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent group-hover:from-primary group-hover:to-blue-500 transition-all">
+                        {vehicle.make} {vehicle.model}
+                      </CardTitle>
+                      <CardDescription className="font-mono text-xs mt-1">{vehicle.registrationNumber}</CardDescription>
                     </div>
-                    <Badge variant="outline" className={statusColor}>
+                    <Badge variant="outline" className={`${statusColor} bg-background/50 backdrop-blur-sm border-current/20 shadow-sm`}>
                       {vehicle.status}
                     </Badge>
                   </div>
                 </CardHeader>
-                <CardContent className="flex-1 space-y-4">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
+                <CardContent className="flex-1 space-y-4 relative z-10">
+                  <div className="grid grid-cols-2 gap-4 p-4 rounded-xl bg-muted/30 border border-border/30">
                     <div>
-                      <span className="text-muted-foreground block">VIN Hash</span>
-                      <span className="font-medium truncate block" title={vehicle.vinHash}>{vehicle.vinHash.substring(0, 10)}...</span>
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1 font-semibold">VIN Hash</span>
+                      <span className="font-mono text-xs truncate block text-foreground/80" title={vehicle.vinHash}>{vehicle.vinHash.substring(0, 10)}...</span>
                     </div>
                     <div>
-                      <span className="text-muted-foreground block">Color</span>
-                      <span className="font-medium capitalize">{vehicle.color}</span>
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1 font-semibold">Color</span>
+                      <span className="font-medium text-sm capitalize text-foreground/80">{vehicle.color}</span>
                     </div>
                   </div>
                   
                   {isPendingTransfer && (
-                    <Alert className="py-2 bg-blue-50 text-blue-900 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
-                      <AlertDescription className="text-xs flex items-center">
-                        <ArrowRight className="h-3 w-3 mr-1" /> Transfer Pending
+                    <Alert className="py-2.5 bg-blue-500/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border-blue-500/20 backdrop-blur-sm animate-pulse">
+                      <AlertDescription className="text-xs font-medium flex items-center">
+                        <ArrowRight className="h-3.5 w-3.5 mr-1.5" /> Transfer Pending
                       </AlertDescription>
                     </Alert>
                   )}
                 </CardContent>
-                <CardFooter className="pt-0 flex gap-2">
+                <CardFooter className="pt-0 flex gap-2 relative z-10">
                   <Link href={`/dashboard/vehicles/${ownership.ownTid}`} className="flex-1">
-                    <Button variant="default" className="w-full">
+                    <Button variant="default" className="w-full bg-primary/90 hover:bg-primary hover:shadow-lg hover:shadow-primary/20 transition-all duration-300">
                       <FileText className="mr-2 h-4 w-4" />
                       View Passport
                     </Button>

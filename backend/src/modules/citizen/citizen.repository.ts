@@ -117,6 +117,7 @@ export const citizenRepository = {
             include: {
                 passport: {
                     select: {
+                        dvpId: true,
                         vinHash: true,
                         engineHash: true,
                         chassisHash: true,
@@ -130,6 +131,21 @@ export const citizenRepository = {
             orderBy: { regDate: 'desc' },
             skip,
             take: limit
+        });
+    },
+
+    /**
+     * Gets the total count of vehicles owned by the citizen for pagination.
+     */
+    async countOwnedVehicles(ownerUserId: string | null, ownerWallet: string) {
+        return prisma.vehicleOwnership.count({
+            where: {
+                isActive: true,
+                OR: [
+                    { ownerWallet: ownerWallet.toLowerCase() },
+                    ...(ownerUserId ? [{ ownerUserId }] : [])
+                ]
+            }
         });
     },
 
@@ -230,5 +246,76 @@ export const citizenRepository = {
                 }
             }
         });
+    },
+
+    /**
+     * Gets all incoming transfer requests where the citizen is the buyer.
+     */
+    async getIncomingTransfers(buyerUserId: string | null, buyerWallet: string) {
+        return prisma.transferRequest.findMany({
+            where: {
+                status: 'PENDING',
+                OR: [
+                    { buyerWallet: buyerWallet.toLowerCase() },
+                    ...(buyerUserId ? [{ buyerUserId }] : [])
+                ]
+            },
+            include: {
+                ownership: {
+                    select: {
+                        ownTid: true,
+                        passport: {
+                            select: {
+                                dvpId: true,
+                                status: true
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: { reqDate: 'desc' }
+        });
+    },
+
+    /**
+     * Retrieves all events associated with a vehicle's ownership and passport for the Timeline.
+     */
+    async getVehicleForTimeline(ownTid: bigint) {
+        return prisma.vehicleOwnership.findUnique({
+            where: { ownTid },
+            include: {
+                passport: {
+                    include: {
+                        manufacturer: { select: { name: true } },
+                        scrapCenter: { select: { name: true } },
+                        loanRecords: {
+                            include: { lenderEntity: { select: { name: true } } }
+                        }
+                    }
+                },
+                rtoEntity: { select: { name: true } },
+                transferRequests: {
+                    include: {
+                        rtoApprover: { select: { name: true } }
+                    }
+                },
+                challans: {
+                    include: {
+                        policeEntity: { select: { name: true } }
+                    }
+                },
+                insurancePolicies: {
+                    include: {
+                        insEntity: { select: { name: true } }
+                    }
+                },
+                pucCertificates: {
+                    include: {
+                        pucEntity: { select: { name: true } }
+                    }
+                }
+            }
+        });
     }
 };
+

@@ -13,6 +13,18 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  webpack: (config) => {
+    config.externals.push('pino-pretty', 'lokijs', 'encoding', 'ws');
+    return config;
+  },
+  turbopack: {
+    resolveAlias: {
+      ws: './src/lib/ws-stub.ts',
+      'pino-pretty': './src/lib/empty-stub.ts',
+      lokijs: './src/lib/empty-stub.ts',
+      encoding: './src/lib/empty-stub.ts',
+    },
+  },
 };
 
 export default nextConfig;

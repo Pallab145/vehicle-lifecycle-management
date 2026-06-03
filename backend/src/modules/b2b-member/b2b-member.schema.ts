@@ -28,7 +28,13 @@ export const memberQuerySchema = z.object({
     })
 });
 
+export const ChangePasswordSchema = z.object({
+    oldPassword: z.string().min(1, 'Old password is required'),
+    newPassword: z.string().min(8, 'New password must be at least 8 characters')
+});
+
 export type CreateMemberInput = z.infer<typeof createMemberSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type UpdateMemberStatusInput = z.infer<typeof updateMemberStatusSchema>;
 export type MemberQueryInput = z.infer<typeof memberQuerySchema>;
+export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;

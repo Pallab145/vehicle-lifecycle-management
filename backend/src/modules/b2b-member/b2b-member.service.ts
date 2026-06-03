@@ -5,7 +5,7 @@ import { MemberRole } from '@/generated/prisma/client';
 import { b2bMemberRepository } from './b2b-member.repository';
 import { emailService } from '../email/email.service';
 import type { CallerIdentity } from '@/types';
-import type { CreateMemberInput, MemberQueryInput } from './b2b-member.schema';
+import type { CreateMemberInput, MemberQueryInput, ChangePasswordInput } from './b2b-member.schema';
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 
@@ -118,5 +118,59 @@ export const b2bMemberService = {
 
         const updated = await b2bMemberRepository.update(memberId, { isActive });
         return updated;
+    },
+
+    async forceResetPassword(memberId: string, caller: CallerIdentity) {
+        if (memberId === caller.sub) {
+            throw createError(400, 'You cannot force reset your own password. Use the normal profile settings.');
+        }
+
+        const targetMember = await b2bMemberRepository.findByIdAndEntity(memberId, caller.entityId!);
+        if (!targetMember) throw createError(404, 'Member not found');
+
+        // Check hierarchy to prevent ADMINs from resetting OWNERs passwords
+        assertRoleHierarchy(caller.role as MemberRole, targetMember.role);
+
+        // Generate secure temporary password
+        const tempPassword = crypto.randomBytes(6).toString('hex');
+        const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+        await prisma.b2BMember.update({
+            where: { id: memberId },
+            data: { passwordHash }
+        });
+
+        // (Optional) Send email notification
+        try {
+            await emailService.sendPasswordResetOtp(targetMember.email, `Admin Reset: ${tempPassword}`);
+        } catch (err) {
+            logger.error({ err, email: targetMember.email }, 'Failed to send admin password reset email');
+        }
+
+        return { member: targetMember, tempPassword };
+    },
+
+    async changePassword(input: ChangePasswordInput, caller: CallerIdentity) {
+        const member = await prisma.b2BMember.findUnique({
+            where: { id: caller.sub }
+        });
+
+        if (!member) {
+            throw createError(404, 'Member not found');
+        }
+
+        const isMatch = await bcrypt.compare(input.oldPassword, member.passwordHash);
+        if (!isMatch) {
+            throw createError(401, 'Incorrect old password');
+        }
+
+        const newPasswordHash = await bcrypt.hash(input.newPassword, 10);
+
+        await prisma.b2BMember.update({
+            where: { id: member.id },
+            data: { passwordHash: newPasswordHash }
+        });
+
+        return true;
     }
 };

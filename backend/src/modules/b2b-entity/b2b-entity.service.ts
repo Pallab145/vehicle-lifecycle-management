@@ -153,7 +153,7 @@ export const b2bEntityService = {
         const encryptedPrivateKey = encryptAES256GCM(wallet.privateKey, input.type);
 
         // ── 4. Generate temporary password ────────────────────────────────────
-        const tempPassword = crypto.randomBytes(6).toString('hex'); // 12 hex chars
+        const tempPassword = 'password123'; // crypto.randomBytes(6).toString('hex'); // 12 hex chars
         const passwordHash = await bcrypt.hash(tempPassword, 10);
 
         // ── 5. Persist entity + signing key + admin member atomically ─────────

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignMessage, useDisconnect } from 'wagmi';
 import { authApi } from '@/lib/api';
@@ -16,6 +16,7 @@ export function Web3LoginButton() {
     const { signMessageAsync } = useSignMessage();
     const { user, refetchUser, isLoading: isUserLoading, logout } = useUser();
     const router = useRouter();
+    const pathname = usePathname();
 
     const [isSigningIn, setIsSigningIn] = useState(false);
 
@@ -117,21 +118,26 @@ export function Web3LoginButton() {
                 }
 
                 // Wallet is connected AND authenticated with backend.
+                const isDashboard = pathname?.startsWith('/dashboard');
+
                 return (
-                    <div className="flex flex-col gap-2 w-full">
-                        <Button onClick={() => router.push('/dashboard')} className="w-full" variant="outline">
-                            <LayoutDashboard className="mr-2 h-4 w-4" />
-                            Go to Dashboard
-                        </Button>
-                        <div className="flex items-center justify-between mt-2 text-sm text-muted-foreground bg-muted p-2 rounded-md">
-                            <span className="truncate max-w-[120px]" title={account.address}>
+                    <div className="flex flex-col sm:flex-row gap-2 items-center w-full">
+                        {!isDashboard && (
+                            <Button onClick={() => router.push('/dashboard')} className="w-full sm:w-auto" variant="outline">
+                                <LayoutDashboard className="mr-2 h-4 w-4" />
+                                Go to Dashboard
+                            </Button>
+                        )}
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground bg-muted/50 border border-border/50 px-3 py-2 rounded-full shadow-sm">
+                            <span className="truncate max-w-[120px] font-medium" title={account.address}>
                                 {account.displayName}
                             </span>
+                            <div className="h-4 w-px bg-border/50 mx-1" />
                             <button 
                                 onClick={handleLogout}
-                                className="text-destructive hover:underline flex items-center"
+                                className="text-destructive hover:text-destructive/80 transition-colors flex items-center font-medium cursor-pointer"
                             >
-                                <LogOut className="h-3 w-3 mr-1" />
+                                <LogOut className="h-4 w-4 mr-1.5" />
                                 Disconnect
                             </button>
                         </div>

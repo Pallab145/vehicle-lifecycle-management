@@ -38,4 +38,17 @@ router.patch(
     b2bMemberController.updateMemberStatus
 );
 
+// 6. Force reset member password (Requires OWNER or ADMIN)
+router.post(
+    '/:id/reset-password',
+    requireRole([MemberRole.OWNER, MemberRole.ADMIN]),
+    b2bMemberController.resetMemberPassword
+);
+
+// 7. Change own password (Any authenticated member)
+router.patch(
+    '/me/password',
+    b2bMemberController.changePassword
+);
+
 export default router;

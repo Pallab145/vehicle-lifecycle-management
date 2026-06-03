@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Outfit, Geist_Mono } from "next/font/google";
 import { Web3Provider } from "@/providers/Web3Provider";
 import { UserProvider } from "@/contexts/UserContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import "./globals.css";
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+
+const outfit = Outfit({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+  variable: "--font-mono",
   subsets: ["latin"],
 });
 
@@ -26,19 +29,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
-        <Web3Provider>
-          <UserProvider>
-            <TooltipProvider>
-              {children}
-            </TooltipProvider>
-            <Toaster position="top-right" richColors />
-          </UserProvider>
-        </Web3Provider>
+      <html
+        lang="en"
+        className={`${outfit.variable} ${geistMono.variable} h-full antialiased font-sans`}
+        suppressHydrationWarning
+      >
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <Web3Provider>
+            <UserProvider>
+              <TooltipProvider>
+                {children}
+              </TooltipProvider>
+              <Toaster position="top-right" richColors />
+            </UserProvider>
+          </Web3Provider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -16,6 +16,7 @@ router.post('/institution/reset-password', authController.resetPassword);
 // ── Citizen (B2C) Routes ──
 router.get('/citizen/nonce', authController.getNonce);
 router.post('/citizen/login', authController.loginCitizen);
+router.post('/citizen/login-aadhaar', authController.loginCitizenAadhaar);
 
 // ── Shared Auth Routes ──
 router.post('/refresh', authController.refresh);

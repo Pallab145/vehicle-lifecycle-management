@@ -1,15 +1,21 @@
 'use client';
 
-import { useVehicleDetail } from '@/hooks/use-citizen';
+import { useVehicleDetail, useInitTransfer, useCancelTransfer, useVehicleTimeline } from '@/hooks/use-citizen';
 import { useParams, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from 'wagmi';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Car, ShieldCheck, AlertTriangle, FileWarning, ArrowRight, Wallet, History, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Car, ShieldCheck, AlertTriangle, FileWarning, ArrowRight, Wallet, History, AlertCircle, Loader2, Factory, Trash2, PiggyBank, FileText, CheckCircle2, Clock } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { InsurancePolicy, PucCertificate, Challan, LoanRecord } from '@/types/citizen';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { InsurancePolicy, PucCertificate, Challan, LoanRecord, TimelineEvent } from '@/types/citizen';
 
 function VehicleDetailSkeleton() {
   return (
@@ -34,8 +40,14 @@ export default function VehicleDetailPage() {
   const params = useParams();
   const router = useRouter();
   const ownTid = params.ownTid as string;
+  const [buyerWallet, setBuyerWallet] = useState('');
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const { initiate, isPending, isConfirming, isConfirmed, hash, error: txError } = useInitTransfer();
+  const { cancel, isPending: isCancelPending, isConfirming: isCancelConfirming, isConfirmed: isCancelConfirmed, error: cancelError } = useCancelTransfer();
+  const { address, isConnected } = useAccount();
 
   const { data, isLoading, error } = useVehicleDetail(ownTid);
+  const { data: timelineData, isLoading: timelineLoading } = useVehicleTimeline(ownTid);
 
   if (isLoading) {
     return <VehicleDetailSkeleton />;
@@ -74,10 +86,10 @@ export default function VehicleDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">{vehicle.make} {vehicle.model}</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Vehicle DVP #{vehicle.dvpId?.toString()}</h1>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded text-sm">
-                {vehicle.registrationNumber}
+                VIN: {vehicle.vinHash?.substring(0, 10)}...
               </span>
               <Badge variant="outline" className={overallStatusColor}>
                 {ownership.status}
@@ -90,9 +102,63 @@ export default function VehicleDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {ownership.status === 'ACTIVE' && (
-            <Button>
-              Initiate Transfer <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
+            <Dialog open={isTransferModalOpen} onOpenChange={setIsTransferModalOpen}>
+              <DialogTrigger render={<Button />}>
+                  <div className="flex items-center">
+                    Initiate Transfer <ArrowRight className="ml-2 h-4 w-4" />
+                  </div>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Transfer Ownership</DialogTitle>
+                  <DialogDescription>
+                    Initiate a transfer to a new buyer. You will need to sign a transaction with your wallet.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4 space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="buyerWallet">Buyer's Wallet Address</Label>
+                    <Input 
+                      id="buyerWallet" 
+                      placeholder="0x..." 
+                      value={buyerWallet} 
+                      onChange={(e) => setBuyerWallet(e.target.value)} 
+                    />
+                  </div>
+                  {txError && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        {txError.message || 'Transaction failed or was rejected.'}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {isConfirmed && (
+                    <Alert className="bg-green-500/10 text-green-600 border-green-500/20">
+                      <ShieldCheck className="h-4 w-4 text-green-600" />
+                      <AlertDescription>
+                        Transfer initiated successfully! Waiting for RTO approval.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsTransferModalOpen(false)}>Cancel</Button>
+                  {!isConnected ? (
+                    <ConnectButton />
+                  ) : address?.toLowerCase() !== ownership.ownerWallet.toLowerCase() ? (
+                    <Button disabled variant="destructive">Switch to owner wallet</Button>
+                  ) : (
+                    <Button 
+                      disabled={isPending || isConfirming || !buyerWallet.startsWith('0x') || buyerWallet.length !== 42}
+                      onClick={() => initiate(ownTid, buyerWallet)}
+                    >
+                      {isPending ? 'Check Wallet...' : isConfirming ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming...</> : 'Confirm Transfer'}
+                    </Button>
+                  )}
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
         </div>
       </div>
@@ -100,19 +166,42 @@ export default function VehicleDetailPage() {
       {isPendingTransfer && (
         <Alert className="border-blue-200 bg-blue-50 text-blue-900 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400">
           <ArrowRight className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-          <AlertTitle>Transfer Request Pending</AlertTitle>
-          <AlertDescription>
-            This vehicle is currently locked in a pending transfer. You cannot initiate a new transfer or scrap the vehicle until this is resolved.
-          </AlertDescription>
+          <div className="flex items-center justify-between">
+            <div>
+                <AlertTitle>Transfer Request Pending</AlertTitle>
+                <AlertDescription>
+                  This vehicle is currently locked in a pending transfer to <strong>{ownership.transferRequests?.[0]?.buyerWallet}</strong>. You cannot initiate a new transfer or scrap the vehicle until this is resolved.
+                </AlertDescription>
+            </div>
+            <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={() => cancel(ownTid)}
+                disabled={isCancelPending || isCancelConfirming || isCancelConfirmed}
+            >
+                {isCancelPending || isCancelConfirming ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancel Transfer'}
+            </Button>
+          </div>
+          {cancelError && (
+              <div className="mt-2 text-sm text-destructive font-medium">
+                  Failed to cancel: {(cancelError as any)?.shortMessage || cancelError.message}
+              </div>
+          )}
+          {isCancelConfirmed && (
+              <div className="mt-2 text-sm text-green-600 font-medium flex items-center gap-1">
+                  <ShieldCheck className="h-4 w-4" /> Cancelled successfully!
+              </div>
+          )}
         </Alert>
       )}
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="insurance">Insurance & PUC</TabsTrigger>
           <TabsTrigger value="challans">Challans & Loans</TabsTrigger>
+          <TabsTrigger value="timeline">History Timeline</TabsTrigger>
         </TabsList>
         
         {/* Overview Tab */}
@@ -297,6 +386,64 @@ export default function VehicleDetailPage() {
                 </div>
               ) : (
                 <p className="text-muted-foreground py-4 text-center border border-dashed rounded-lg">No active loans found on this vehicle.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Timeline Tab */}
+        <TabsContent value="timeline" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center">
+                <Clock className="mr-2 h-5 w-5 text-primary" /> Lifecycle Timeline
+              </CardTitle>
+              <CardDescription>A complete cryptographic history of all events related to this vehicle.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {timelineLoading ? (
+                <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+              ) : !timelineData?.timeline?.length ? (
+                <p className="text-muted-foreground text-center py-4">No events found.</p>
+              ) : (
+                <div className="relative border-l border-muted ml-3 space-y-8 pb-4">
+                  {timelineData.timeline.map((event: TimelineEvent) => {
+                    let Icon = FileText;
+                    let color = "bg-primary";
+                    let iconColor = "text-primary";
+                    
+                    if (event.type === 'MANUFACTURED') { Icon = Factory; color = 'bg-blue-500 text-white border-blue-500'; iconColor = "text-white"; }
+                    if (event.type === 'REGISTERED') { Icon = CheckCircle2; color = 'bg-green-500 text-white border-green-500'; iconColor = "text-white"; }
+                    if (event.type === 'TRANSFER_COMPLETED') { Icon = Wallet; color = 'bg-indigo-500 text-white border-indigo-500'; iconColor = "text-white"; }
+                    if (event.type === 'CHALLAN_ISSUED') { Icon = FileWarning; color = 'bg-red-500 text-white border-red-500'; iconColor = "text-white"; }
+                    if (event.type === 'CHALLAN_PAID') { Icon = CheckCircle2; color = 'bg-emerald-500 text-white border-emerald-500'; iconColor = "text-white"; }
+                    if (event.type === 'INSURANCE_ISSUED' || event.type === 'PUC_ISSUED') { Icon = ShieldCheck; color = 'bg-teal-500 text-white border-teal-500'; iconColor = "text-white"; }
+                    if (event.type === 'LOAN_DISBURSED') { Icon = PiggyBank; color = 'bg-amber-500 text-white border-amber-500'; iconColor = "text-white"; }
+                    if (event.type === 'SCRAPPED') { Icon = Trash2; color = 'bg-gray-800 text-white border-gray-800'; iconColor = "text-white"; }
+
+                    return (
+                      <div key={event.id} className="relative pl-8">
+                        <div className={`absolute -left-4 top-1 h-8 w-8 rounded-full border-2 flex items-center justify-center ${color}`}>
+                          <Icon className={`h-4 w-4 ${iconColor}`} />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <time className="text-sm text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">
+                              {new Date(event.date).toLocaleDateString()} {new Date(event.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </time>
+                          </div>
+                          <p className="text-muted-foreground">{event.description}</p>
+                          {event.metadata && Object.keys(event.metadata).length > 0 && (
+                            <div className="mt-2 bg-muted/50 rounded p-2 text-xs font-mono text-muted-foreground break-all">
+                              {JSON.stringify(event.metadata)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </CardContent>
           </Card>

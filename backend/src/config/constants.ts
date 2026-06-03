@@ -15,6 +15,7 @@ export const CSRF_EXEMPT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const CSRF_EXEMPT_PATHS = new Set([
     '/api/auth/institution/login',
     '/api/auth/citizen/login',
+    '/api/auth/citizen/login-aadhaar',
     '/api/auth/refresh',
 ]);
 

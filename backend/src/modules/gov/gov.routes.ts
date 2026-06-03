@@ -19,6 +19,28 @@ router.use(requireB2B);
 router.use(requireEntityType([EntityType.GOVERNMENT]));
 
 // ----------------------------------------------------------------------------
+// SYSTEM ANALYTICS
+// ----------------------------------------------------------------------------
+
+/**
+ * GET /api/gov/analytics
+ * Retrieve system-wide analytics (vehicles, fines, institutions).
+ */
+router.get(
+    '/analytics',
+    govController.getSystemAnalytics
+);
+
+/**
+ * GET /api/gov/audit-logs
+ * Retrieve system-wide aggregated audit logs.
+ */
+router.get(
+    '/audit-logs',
+    govController.getGlobalAuditLogs
+);
+
+// ----------------------------------------------------------------------------
 // GLOBAL CHALLAN MANAGEMENT
 // ----------------------------------------------------------------------------
 

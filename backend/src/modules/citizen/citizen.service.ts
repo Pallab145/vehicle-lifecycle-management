@@ -185,7 +185,11 @@ export const citizenService = {
      * Retrieves all vehicles owned by the citizen.
      */
     async getMyVehicles(ownerUserId: string | null, ownerWallet: string, page: number, limit: number) {
-        return citizenRepository.getOwnedVehicles(ownerUserId, ownerWallet, page, limit);
+        const [vehicles, total] = await Promise.all([
+            citizenRepository.getOwnedVehicles(ownerUserId, ownerWallet, page, limit),
+            citizenRepository.countOwnedVehicles(ownerUserId, ownerWallet)
+        ]);
+        return { vehicles, total };
     },
 
     /**
@@ -209,5 +213,145 @@ export const citizenService = {
             throw createError(404, 'No pending transfer found for this vehicle associated with your account');
         }
         return transfer;
+    },
+
+    /**
+     * Aggregates all vehicle records into a chronological timeline array.
+     */
+    async getVehicleTimeline(ownTid: bigint, callerUserId: string | null, callerWallet: string) {
+        // 1. Verify ownership (must be active owner to see the timeline)
+        const vehicle = await citizenRepository.getVehicleByOwnTid(ownTid, callerUserId, callerWallet);
+        if (!vehicle) {
+            throw createError(404, 'Vehicle not found or you are not the active owner');
+        }
+
+        // 2. Fetch full timeline data
+        const timelineData = await citizenRepository.getVehicleForTimeline(ownTid);
+        if (!timelineData || !timelineData.passport) {
+            throw createError(404, 'Vehicle timeline data missing');
+        }
+
+        const events = [];
+
+        // Manufactured
+        events.push({
+            id: `mfg-${timelineData.passport.id}`,
+            date: timelineData.passport.mfgDate,
+            type: 'MANUFACTURED',
+            title: 'Vehicle Manufactured',
+            description: `Manufactured by ${timelineData.passport.manufacturer.name}`,
+            metadata: { vinHash: timelineData.passport.vinHash }
+        });
+
+        // Registered
+        events.push({
+            id: `reg-${timelineData.id}`,
+            date: timelineData.regDate,
+            type: 'REGISTERED',
+            title: 'First Registration',
+            description: `Registered at ${timelineData.rtoEntity.name}`,
+        });
+
+        // Scrapped
+        if (timelineData.passport.status === VehicleStatus.SCRAPPED && timelineData.passport.scrapDate) {
+            events.push({
+                id: `scrap-${timelineData.passport.id}`,
+                date: timelineData.passport.scrapDate,
+                type: 'SCRAPPED',
+                title: 'Vehicle Scrapped',
+                description: `Decommissioned at ${timelineData.passport.scrapCenter?.name || 'Unknown Scrap Center'}`,
+            });
+        }
+
+        // Transfer Requests
+        timelineData.transferRequests.forEach(tr => {
+            events.push({
+                id: `tr-init-${tr.id}`,
+                date: tr.reqDate,
+                type: 'TRANSFER_INITIATED',
+                title: 'Ownership Transfer Initiated',
+                description: `Transfer from ${tr.sellerWallet.slice(0,6)}... to ${tr.buyerWallet.slice(0,6)}...`,
+                metadata: { status: tr.status }
+            });
+            if (tr.completedDate) {
+                events.push({
+                    id: `tr-done-${tr.id}`,
+                    date: tr.completedDate,
+                    type: 'TRANSFER_COMPLETED',
+                    title: 'Ownership Transfer Completed',
+                    description: `Approved by ${tr.rtoApprover?.name || 'RTO'}`,
+                });
+            }
+        });
+
+        // Challans
+        timelineData.challans.forEach(c => {
+            events.push({
+                id: `chal-iss-${c.id}`,
+                date: c.issuedAt,
+                type: 'CHALLAN_ISSUED',
+                title: 'Traffic Challan Issued',
+                description: `Fine of ₹${c.amount} issued by ${c.policeEntity.name}`,
+                metadata: { amount: Number(c.amount) }
+            });
+            if (c.paidAt) {
+                events.push({
+                    id: `chal-paid-${c.id}`,
+                    date: c.paidAt,
+                    type: 'CHALLAN_PAID',
+                    title: 'Traffic Challan Paid',
+                    description: `Fine of ₹${c.amount} was cleared`,
+                });
+            }
+        });
+
+        // Insurance
+        timelineData.insurancePolicies.forEach(ip => {
+            events.push({
+                id: `ins-${ip.id}`,
+                date: ip.issueDate,
+                type: 'INSURANCE_ISSUED',
+                title: 'Insurance Policy Issued',
+                description: `Issued by ${ip.insEntity.name}`,
+                metadata: { premium: Number(ip.premium), coverage: Number(ip.coverage), expiry: ip.expiryDate }
+            });
+        });
+
+        // PUC
+        timelineData.pucCertificates.forEach(puc => {
+            events.push({
+                id: `puc-${puc.id}`,
+                date: puc.issueDate,
+                type: 'PUC_ISSUED',
+                title: 'PUC Certificate Issued',
+                description: `Issued by ${puc.pucEntity.name}`,
+                metadata: { expiry: puc.expiryDate }
+            });
+        });
+
+        // Loans
+        timelineData.passport.loanRecords.forEach(loan => {
+            events.push({
+                id: `loan-disb-${loan.id}`,
+                date: loan.disbursedAt,
+                type: 'LOAN_DISBURSED',
+                title: 'Vehicle Loan Disbursed',
+                description: `Financed by ${loan.lenderEntity.name} for ₹${loan.amount}`,
+            });
+            if (loan.clearedAt) {
+                events.push({
+                    id: `loan-clear-${loan.id}`,
+                    date: loan.clearedAt,
+                    type: 'LOAN_CLEARED',
+                    title: 'Vehicle Loan Cleared',
+                    description: `NOC issued by ${loan.lenderEntity.name}`,
+                });
+            }
+        });
+
+        // Sort descending (newest first)
+        events.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+        return events;
     }
 };

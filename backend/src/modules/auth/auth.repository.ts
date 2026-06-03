@@ -62,5 +62,40 @@ export const authRepository = {
                 walletAddress: normalizedWallet,
             }
         });
+    },
+
+    async findCitizenByVehicleAndAadhaar(ownTidRaw: string, _documentNumber: string) {
+        // Convert to BigInt if possible, else return null
+        let ownTid: bigint;
+        try {
+            ownTid = BigInt(ownTidRaw);
+        } catch {
+            return null; // Invalid token ID
+        }
+
+        // Find active ownership by ownTid
+        const ownership = await prisma.vehicleOwnership.findUnique({
+            where: {
+                ownTid: ownTid,
+            }
+        });
+
+        if (!ownership || !ownership.isActive || !ownership.ownerUserId) {
+            return null;
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: ownership.ownerUserId }
+        });
+
+        if (!user) {
+            return null;
+        }
+        // In this mock, we just check if the user is verified, as we don't store the raw Aadhaar number
+        if (!user.isVerified) {
+            return null;
+        }
+
+        return user;
     }
 };

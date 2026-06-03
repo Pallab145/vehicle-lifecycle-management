@@ -139,6 +139,29 @@ async function main() {
                 }
             });
 
+            // --- Seed a Mock RTO for Citizen KYC testing ---
+            console.log('\n🏢 Seeding Mock RTO for testing...');
+            const rtoCode = 'DL-01-RTO';
+            const existingRto = await tx.b2BEntity.findUnique({
+                where: { code: rtoCode }
+            });
+
+            if (!existingRto) {
+                await tx.b2BEntity.create({
+                    data: {
+                        type: EntityType.RTO,
+                        code: rtoCode,
+                        name: 'Delhi Central RTO (Mock)',
+                        isActive: true,
+                        // RTO doesn't strictly need a wallet address in the mock, but we can provide a dummy one
+                        walletAddress: '0x0000000000000000000000000000000000000001',
+                    }
+                });
+                console.log(`   ✅ Created RTO: Delhi Central RTO (${rtoCode})`);
+            } else {
+                console.log(`   ⚠️ RTO ${rtoCode} already exists.`);
+            }
+
             // --- Seed Initial Indexer State ---
             const deploymentBlock = process.env.DEPLOYMENT_BLOCK;
             if (deploymentBlock) {

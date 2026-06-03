@@ -59,7 +59,11 @@ export const mfgController = {
 
         res.status(200).json({
             success: true,
-            vehicles: sanitizeResponseData(result)
+            vehicles: sanitizeResponseData(result.items),
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages
         });
     })
 };

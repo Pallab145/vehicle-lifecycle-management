@@ -26,7 +26,10 @@ export const citizenController = {
         res.status(200).json({
             success: true,
             message: 'KYC Verification successful',
-            citizen: result
+            profile: {
+                ...result,
+                isKycVerified: result.isVerified
+            }
         });
     }),
     
@@ -48,7 +51,10 @@ export const citizenController = {
 
         res.status(200).json({
             success: true,
-            citizen: user
+            profile: {
+                ...user,
+                isKycVerified: user.isVerified
+            }
         });
     }),
 
@@ -88,7 +94,7 @@ export const citizenController = {
         const caller = req.caller!; // requireB2C guarantees caller + wallet
 
         const { query } = listVehiclesQuerySchema.parse({ query: req.query });
-        const vehicles = await citizenService.getMyVehicles(
+        const result = await citizenService.getMyVehicles(
             caller.sub ?? null,
             caller.wallet!,
             query.page,
@@ -97,7 +103,8 @@ export const citizenController = {
         
         res.status(200).json({
             success: true,
-            vehicles
+            vehicles: result.vehicles,
+            total: result.total
         });
     }),
 
@@ -178,6 +185,44 @@ export const citizenController = {
         res.status(200).json({
             success: true,
             transfer
+        });
+    }),
+
+    /**
+     * GET /api/citizens/transfers/incoming
+     * Returns all incoming transfers for the citizen (buyer side)
+     */
+    getIncomingTransfers: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+        
+        const transfers = await citizenRepository.getIncomingTransfers(
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            transfers
+        });
+    }),
+
+    /**
+     * GET /api/citizens/vehicles/:ownTid/timeline
+     * Returns the full lifecycle history of the vehicle.
+     */
+    getVehicleTimeline: asyncHandler(async (req: Request, res: Response) => {
+        const caller = req.caller!;
+
+        const { params } = ownTidParamSchema.parse({ params: req.params });
+        const events = await citizenService.getVehicleTimeline(
+            BigInt(params.ownTid),
+            caller.sub ?? null,
+            caller.wallet!
+        );
+
+        res.status(200).json({
+            success: true,
+            timeline: events
         });
     })
 };

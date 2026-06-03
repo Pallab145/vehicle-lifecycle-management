@@ -92,7 +92,21 @@ export interface ScrapEligibilityResult {
 export interface TransferEligibilityResult {
     isEligible: boolean;
     reasons: string[];
+    warnings?: string[];
     currentTransfer?: TransferRequest | null;
+    vehicleDetails: {
+        vinHash: string;
+        rtoEntityId: string;
+    };
+}
+
+export interface TimelineEvent {
+    id: string;
+    date: string;
+    type: 'MANUFACTURED' | 'REGISTERED' | 'TRANSFER_INITIATED' | 'TRANSFER_COMPLETED' | 'CHALLAN_ISSUED' | 'CHALLAN_PAID' | 'INSURANCE_ISSUED' | 'PUC_ISSUED' | 'LOAN_DISBURSED' | 'LOAN_CLEARED' | 'SCRAPPED';
+    title: string;
+    description: string;
+    metadata?: Record<string, any>;
 }
 
 export interface TransferRequest {

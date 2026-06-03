@@ -10,11 +10,16 @@ import {
     Users, 
     Settings,
     FileCheck2,
-    CarFront,
     ArrowLeftRight,
     Search,
     FileText,
-    Activity
+    Activity,
+    Hammer,
+    History,
+    FileWarning,
+    FileSearch,
+    ClipboardCheck,
+    Shield,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -35,7 +40,9 @@ export const ENTITY_NAV_CONFIG: Record<string, NavItem[]> = {
     GOVERNMENT: [
         { name: 'National Overview', href: '/institutions/dashboard/gov', icon: Activity },
         { name: 'Entity Directory', href: '/institutions/dashboard/gov/entities', icon: Search },
-        { name: 'System Logs', href: '/institutions/dashboard/gov/logs', icon: FileText },
+        { name: 'Global Challans', href: '/institutions/dashboard/gov/logs', icon: FileText },
+        { name: 'Global Audit Logs', href: '/institutions/dashboard/gov/audit', icon: FileText },
+        { name: 'Governance', href: '/institutions/dashboard/gov/admin', icon: ShieldCheck },
     ],
     RTO: [
         { name: 'RTO Hub', href: '/institutions/dashboard/rto', icon: Landmark },
@@ -44,33 +51,33 @@ export const ENTITY_NAV_CONFIG: Record<string, NavItem[]> = {
         { name: 'Trade Certificates', href: '/institutions/dashboard/rto/trade-certs', icon: FileCheck2 },
     ],
     MANUFACTURER: [
-        { name: 'Mfg Hub', href: '/institutions/dashboard/mfg', icon: Factory },
-        { name: 'Mint Vehicle (DVP)', href: '/institutions/dashboard/mfg/mint', icon: CarFront },
-        { name: 'Production History', href: '/institutions/dashboard/mfg/history', icon: FileText },
+        { name: 'MFG Hub', href: '/institutions/dashboard/mfg', icon: Factory },
+        { name: 'Mint Vehicle', href: '/institutions/dashboard/mfg/mint', icon: Hammer },
+        { name: 'Production History', href: '/institutions/dashboard/mfg/history', icon: History },
     ],
     POLICE: [
         { name: 'Police Hub', href: '/institutions/dashboard/police', icon: ShieldAlert },
-        { name: 'Issue Challan', href: '/institutions/dashboard/police/challan', icon: FileSignature },
-        { name: 'Vehicle Search', href: '/institutions/dashboard/police/search', icon: Search },
+        { name: 'Issue Challan', href: '/institutions/dashboard/police/challan', icon: FileWarning },
+        { name: 'Challan Records', href: '/institutions/dashboard/police/search', icon: Search },
     ],
     INSURANCE: [
         { name: 'Insurance Hub', href: '/institutions/dashboard/insurance', icon: ShieldCheck },
-        { name: 'Issue Policy', href: '/institutions/dashboard/insurance/policies', icon: FileSignature },
-        { name: 'Process Claims', href: '/institutions/dashboard/insurance/claims', icon: Activity },
+        { name: 'Policies', href: '/institutions/dashboard/insurance/policies', icon: FileText },
+        { name: 'Claims & Expiry', href: '/institutions/dashboard/insurance/claims', icon: FileSearch },
     ],
     PUC_CENTER: [
         { name: 'PUC Hub', href: '/institutions/dashboard/puc', icon: Wind },
-        { name: 'Issue Certificate', href: '/institutions/dashboard/puc/issue', icon: FileCheck2 },
-        { name: 'Testing Logs', href: '/institutions/dashboard/puc/logs', icon: FileText },
+        { name: 'Issue Certificate', href: '/institutions/dashboard/puc/issue', icon: ClipboardCheck },
+        { name: 'Testing Logs', href: '/institutions/dashboard/puc/logs', icon: History },
     ],
     SCRAP_CENTER: [
         { name: 'Scrap Hub', href: '/institutions/dashboard/scrap', icon: Recycle },
-        { name: 'Process Scrap', href: '/institutions/dashboard/scrap/process', icon: FileCheck2 },
-        { name: 'Dismantling Logs', href: '/institutions/dashboard/scrap/logs', icon: FileText },
+        { name: 'Process Vehicle', href: '/institutions/dashboard/scrap/process', icon: Search },
+        { name: 'Dismantling Logs', href: '/institutions/dashboard/scrap/logs', icon: History },
     ],
     BANK: [
         { name: 'Bank Hub', href: '/institutions/dashboard/bank', icon: Landmark },
-        { name: 'Issue Loan', href: '/institutions/dashboard/bank/loans', icon: FileSignature },
-        { name: 'Issue NOC', href: '/institutions/dashboard/bank/noc', icon: FileCheck2 },
+        { name: 'Loan Management', href: '/institutions/dashboard/bank/loans', icon: FileText },
+        { name: 'NOC & Settlement', href: '/institutions/dashboard/bank/noc', icon: Shield },
     ],
 };

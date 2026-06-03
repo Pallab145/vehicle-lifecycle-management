@@ -15,9 +15,17 @@ export const vehiclePrivateChain = {
   },
 } as const satisfies Chain;
 
+const projectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID;
+if (!projectId) {
+  console.warn(
+    '⚠️  NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID is not set. ' +
+    'Get one free at https://cloud.walletconnect.com/ and add it to .env.local'
+  );
+}
+
 export const config = getDefaultConfig({
   appName: 'Vehicle Lifecycle Management',
-  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID as string,
+  projectId: projectId || 'PLACEHOLDER_GET_ID_FROM_WALLETCONNECT_CLOUD',
   chains: [vehiclePrivateChain],
   ssr: true, // Required for Next.js App Router
 });
